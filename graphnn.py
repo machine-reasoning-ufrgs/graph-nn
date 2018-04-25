@@ -85,23 +85,28 @@ class GraphNN(object):
 			That is: an entry loop["V2"] = [ (None, None, "V2"), ("M","cast","V1") ] creates this relation for every timestep: V2 <- tf.append( [ I x id(V2) , M x cast(V1) ] )
 			If a matrix name is None, then the matrix is the identity Matrix.
 			If a message name is None, then the message is the identity function.
-			If a variable name is None, then the variable is the Identity Matrix
+			If a variable name is None, then the variable is a vector of ones.
 			If there is the transpose variable, it must be a boolean whose truth value indicates whether or not the matrix whose name is being called needs to be transposed.
 		"""
 		self.var = var
 		self.mat = mat
 		self.msg = msg
 		self.loop = {}
+		self.none_ones = {}
 		for v, f in loop.items():
 			self.loop[v] = []
 			for vals in f:
 				if len( vals ) == 3:
-					_mat,_msg,_var = vals
-					self.loop[v].append( (_mat, _msg, _var, False) )
+					_mat, _msg, _var = vals
+					self.loop[v].append( ( _mat, _msg, _var, False ) )
 				elif len( vals ) == 4:
-					self.loop[v].append( vals )
+					_mat, _msg, _var, _transpose = vals
+					self.loop[v].append( ( _mat, _msg, _var, _transpose ) )
 				else:
 					raise Exception( "Loop body definition \"{tuple}\" isn't a 3-tuple or 4-tuple!".format( tuple = vals ) ) # TODO correct exception type
+				#end if
+				if _var is None:
+					self.none_ones[ self.mat[_mat][1] ] = True
 				#end if
 			#end for
 		#end for
@@ -217,6 +222,9 @@ class GraphNN(object):
 			cell_h0 = tf.tile( init, [ self.num_vars[v], 1 ] )
 			cell_c0 = tf.zeros_like( cell_h0, dtype = tf.float32 )
 			cell_state[v] = tf.contrib.rnn.LSTMStateTuple( h = cell_h0, c = cell_c0 )
+			if v in self.none_ones:
+				self.none_ones[v] = tf.ones( [ self.num_vars[v], 1 ], dtype = tf.float32, name = "1_{}".format( v ) )
+			#end if
 		#end for
 		
 		_, _, cell_state = tf.while_loop(
@@ -233,9 +241,10 @@ class GraphNN(object):
 		for v1 in self.var:
 			inputs = []
 			for m,f,v2,transpose in self.loop[v1]:
-				fv2 = self._tf_msgs[f]( states[v2].h ) if f is not None else states[v2].h
-				mfv2 = tf.sparse_tensor_dense_matmul( self.matrix_placeholders[m], fv2, adjoint_a=transpose ) if m is not None else fv2
-				inputs.append( mfv2 )
+				vs = states[v2].h if v2 is not None else self.none_ones[ self.mat[m][1] ]
+				fvs = self._tf_msgs[f]( vs ) if f is not None else vs
+				mfvs = tf.sparse_tensor_dense_matmul( self.matrix_placeholders[m], fvs, adjoint_a=transpose ) if m is not None else fvs
+				inputs.append( mfvs )
 			#end for
 			if len( inputs ) > 1:
 				v_inputs = tf.concat( inputs, axis = 1 )
