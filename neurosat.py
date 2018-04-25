@@ -34,7 +34,7 @@ def dense_to_sparse( M ):
 		#end for
 	#end for
 	return (M_i,M_v,M_shape)
-#end
+#end dense_to_sparse
 
 def build_neurosat(d):
 
@@ -150,14 +150,14 @@ def build_neurosat(d):
 	neurosat["accuracy"] 				= accuracy
 
 	return neurosat
-#end
+#end build_neurosat
 
 if __name__ == '__main__':
 
 	d 					= 128
 	epochs 				= 20
 	batch_size 			= 64
-	batches_per_epoch 	= 128
+	batches_per_epoch 	= 2#128
 	timesteps 			= 26
 
 	# Build model
@@ -179,6 +179,11 @@ if __name__ == '__main__':
 		print( "{timestamp}\t{memory}\tRunning for {} epochs".format( epochs, timestamp = timestamp(), memory = memory_usage() ) )
 		for epoch in range( epochs ):
 			# Run batches
+			instance_generator.reset()
+			epoch_loss = 0.0
+			epoch_accuracy = 0.0
+			epoch_n = 0
+			epoch_m = 0
 			for b, I in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
 
 				I_sat = np.array( list( 1 if sat else 0 for sat in I.sat ) )
@@ -200,7 +205,12 @@ if __name__ == '__main__':
 					neurosat["instance_SAT"]:					I_sat,
 					neurosat["num_vars_on_instance"]: 			I_n
 					} )
-
+					
+				epoch_loss += loss
+				epoch_accuracy += accuracy
+				epoch_n += n
+				epoch_m += m
+				
 				print(
 					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m}) | Solver (Loss, Acc): ({loss:.5f}, {accuracy:.5f})".format(
 						timestamp = timestamp(),
@@ -214,9 +224,22 @@ if __name__ == '__main__':
 					),
 					flush = True
 				)
-
 			#end for
-
+			# Summarize Epoch
+			epoch_loss = epoch_loss / batches_per_epoch
+			epoch_accuracy = epoch_accuracy / batches_per_epoch
+			print(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m}) | Solver (Mean Loss, Mean Acc): ({loss:.5f}, {accuracy:.5f})".format(
+					timestamp = timestamp(),
+					memory = memory_usage(),
+					epoch = epoch,
+					batch = "all",
+					loss = epoch_loss,
+					accuracy = epoch_accuracy,
+					n = epoch_n,
+					m = epoch_m,
+				),
+				flush = True
+			)
 		#end for
-
-	#end
+	#end Session
