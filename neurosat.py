@@ -157,7 +157,7 @@ if __name__ == '__main__':
 	d 					= 128
 	epochs 				= 20
 	batch_size 			= 64
-	batches_per_epoch 	= 2#128
+	batches_per_epoch 	= 128
 	timesteps 			= 26
 
 	# Build model
