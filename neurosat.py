@@ -57,7 +57,6 @@ def build_neurosat(d):
 		},
 		{
 			"M": ("L","C"),
-			"Mt": ("C","L"),
 			"Inv": ("L","L")
 		},
 		{
@@ -66,7 +65,7 @@ def build_neurosat(d):
 		},
 		{
 			"L": [("Inv",None,"L"),("M","Cmsg","C")],
-			"C": [("Mt","Lmsg","L")]
+			"C": [("M","Lmsg","L",True)]
 		},
 		name="NeuroSAT"
 		)
@@ -187,12 +186,6 @@ if __name__ == '__main__':
 				M = I.get_sparse_matrix()
 
 				n, m =  M[2][0]//2, M[2][1]
-				
-				Mt = (
-					[ (j,i) for (i,j) in M[0] ],
-					[ val for val in M[1] ],
-					(m,2*n)
-					)
 
 				Inv = (
 					[ (i,n+i) for i in range(n) ] + [ (n+i,i) for i in range(n) ],
@@ -202,7 +195,6 @@ if __name__ == '__main__':
 
 				loss, accuracy = sess.run( [neurosat["loss"], neurosat["accuracy"]], feed_dict={
 					neurosat["gnn"].matrix_placeholders["M"]:	M,
-					neurosat["gnn"].matrix_placeholders["Mt"]:	Mt,
 					neurosat["gnn"].matrix_placeholders["Inv"]: Inv,
 					neurosat["gnn"].time_steps: 				timesteps,
 					neurosat["instance_SAT"]:					I_sat,

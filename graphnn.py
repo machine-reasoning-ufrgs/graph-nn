@@ -81,18 +81,40 @@ class GraphNN(object):
 			That is: an entry mat["M"] = ("V1","V2") means that the matrix "M" can be used to mask messages from "V1" to "V2".
 		msg is a dictionary from function names to variable pairs.
 			That is: an entry msg["cast"] = ("V1","V2") means that one can apply "cast" to convert messages from "V1" to "V2".
-		loop is a dictionary from variable names to lists of triples ( matrix name,message name,variable name )
+		loop is a dictionary from variable names to lists of triples ( matrix name, message name, variable name ) or quadruples ( matrix name, message name, variable name, transpose? )
 			That is: an entry loop["V2"] = [ (None, None, "V2"), ("M","cast","V1") ] creates this relation for every timestep: V2 <- tf.append( [ I x id(V2) , M x cast(V1) ] )
+			If a matrix name is None, then the matrix is the identity Matrix.
+			If a message name is None, then the message is the identity function.
+			If a variable name is None, then the variable is the Identity Matrix
+			If there is the transpose variable, it must be a boolean whose truth value indicates whether or not the matrix whose name is being called needs to be transposed.
 		"""
 		self.var = var
 		self.mat = mat
 		self.msg = msg
-		self.loop = loop
+		self.loop = {}
+		for v, f in loop.items():
+			self.loop[v] = []
+			for vals in f:
+				if len( vals ) == 3:
+					_mat,_msg,_var = vals
+					self.loop[v].append( (_mat, _msg, _var, False) )
+				elif len( vals ) == 4:
+					self.loop[v].append( vals )
+				else:
+					raise Exception( "Loop body definition \"{tuple}\" isn't a 3-tuple or 4-tuple!".format( tuple = vals ) ) # TODO correct exception type
+				#end if
+			#end for
+		#end for
 		self.name = name
 		
 		for v in self.var:
-			if v not in loop:
+			if v not in self.loop:
 				raise Exception( "Variable \"{v}\" not being updated in the loop!".format( v = v ) ) # TODO correct exception type
+			#end if
+		#end for
+		for v in self.loop:
+			if v not in self.var:
+				raise Exception( "Variable \"{v}\" in the loop has not been declared!".format( v = v ) ) # TODO correct exception type
 			#end if
 		#end for
 		for m, vp in self.mat.items():
@@ -210,9 +232,9 @@ class GraphNN(object):
 		new_states = {}
 		for v1 in self.var:
 			inputs = []
-			for m,f,v2 in self.loop[v1]:
+			for m,f,v2,transpose in self.loop[v1]:
 				fv2 = self._tf_msgs[f]( states[v2].h ) if f is not None else states[v2].h
-				mfv2 = tf.sparse_tensor_dense_matmul( self.matrix_placeholders[m], fv2 ) if m is not None else fv2
+				mfv2 = tf.sparse_tensor_dense_matmul( self.matrix_placeholders[m], fv2, adjoint_a=transpose ) if m is not None else fv2
 				inputs.append( mfv2 )
 			#end for
 			if len( inputs ) > 1:
