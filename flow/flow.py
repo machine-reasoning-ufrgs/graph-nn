@@ -66,7 +66,9 @@ def build_network(d):
 			"N": d
 		},
 		{
-			"M": ("N","N")
+			"M": ("N","N"),
+			"S": ("N","N"),
+			"T": ("N","N")
 		},
 		{
 			"Nmsg": ("N","N")
@@ -81,6 +83,12 @@ def build_network(d):
 					"mat": "M",
 					"transpose?": True,
 					"var": "N"
+				},
+				{
+					"mat": "S"
+				},
+				{
+					"mat": "T"
 				}
 			]
 		},
@@ -198,6 +206,8 @@ if __name__ == '__main__':
 				m = 0
 				n = 0
 				batch_allowed_flow_error = 0
+				S_index = []
+				T_index = []
 				M_index = []
 				M_values = []
 				flows = []
@@ -215,6 +225,8 @@ if __name__ == '__main__':
 						M_index.append( ( n + t, n + s ) )
 						M_values.append( G[t][s]["capacity"] )
 					#end for
+					S_index.append( (n, n) )
+					T_index.append( (n + g_n - 1, n + g_n - 1) )
 					flow = nx.maximum_flow_value( G, 0, g_n-1 )
 					batch_allowed_flow_error += flow * n_loss_increase_threshold
 					flows.append( flow )
@@ -230,6 +242,8 @@ if __name__ == '__main__':
 						M_index.append( ( n + t, n + s ) )
 						M_values.append( G[t][s]["capacity"] )
 					#end for
+					S_index.append( (n, n) )
+					T_index.append( (n + g_n - 1, n + g_n - 1) )
 					flow = nx.maximum_flow_value( G, 0, g_n-1 )
 					batch_allowed_flow_error += flow * n_loss_increase_threshold
 					flows.append( flow )
@@ -240,12 +254,16 @@ if __name__ == '__main__':
 				#end for
 				M_shape = (n,n)
 				M = (M_index, M_values, M_shape)
+				S = (S_index, [1 for _ in S_index], M_shape)
+				T = (T_index, [1 for _ in T_index], M_shape)
 				time_steps = max_n
 
 				_, loss = sess.run(
 					[ GNN["train_step"], GNN["loss"] ],
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["M"]: M,
+						GNN["gnn"].matrix_placeholders["S"]: S,
+						GNN["gnn"].matrix_placeholders["T"]: T,
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_val"]: flows,
 						GNN["num_vars_on_instance"]: n_vars
@@ -299,6 +317,8 @@ if __name__ == '__main__':
 			G = nx.fast_gnp_random_graph( test_n, edge_probability )
 			flows = []
 			n_vars = []
+			S_index = []
+			T_index = []
 			M_index = []
 			M_values = []
 			for s, t in G.edges:
@@ -308,6 +328,8 @@ if __name__ == '__main__':
 				M_index.append( ( t, s ) )
 				M_values.append( G[t][s]["capacity"] )
 			#end for
+			S_index.append( (0, 0) )
+			T_index.append( (test_n - 1, test_n - 1) )
 			flow = nx.maximum_flow_value( G, 0, test_n-1 )
 			test_allowed_flow_error = flow * n_loss_increase_threshold
 			flows.append( flow )
@@ -315,12 +337,16 @@ if __name__ == '__main__':
 			test_m = len( G.edges )
 			M_shape = (test_n,test_n)
 			M = (M_index, M_values, M_shape)
+			S = (S_index, [1 for _ in S_index], M_shape)
+			T = (T_index, [1 for _ in T_index], M_shape)
 			time_steps = test_n
 
 			_, test_loss = sess.run(
 				[ GNN["train_step"], GNN["loss"] ],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
+					GNN["gnn"].matrix_placeholders["S"]: S,
+					GNN["gnn"].matrix_placeholders["T"]: T,
 					GNN["gnn"].time_steps: time_steps,
 					GNN["instance_val"]: flows,
 					GNN["num_vars_on_instance"]: n_vars
