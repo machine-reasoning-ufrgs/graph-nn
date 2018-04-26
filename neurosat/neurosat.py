@@ -1,10 +1,12 @@
-
 import sys, os, time
 import tensorflow as tf
 import numpy as np
-
+# Add the parent folder path to the sys.path list for importing
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
+# Import model builder
 from graphnn import GraphNN
 from cnf import CNF
+# Import tools
 import instance_loader
 import itertools
 from cnf import create_batchCNF
@@ -75,8 +77,25 @@ def build_neurosat(d):
 			"Cmsg": ("C","L")
 		},
 		{
-			"L": [(None,INV,None,"L"),("M",None,"Cmsg","C")],
-			"C": [("M",None,"Lmsg","L",True)]
+			"L": [
+				{
+					"fun": INV,
+					"var": "L"
+				},
+				{
+					"mat": "M",
+					"msg": "Cmsg",
+					"var": "C"
+				}
+			],
+			"C": [
+				{
+					"mat": "M",
+					"transpose?": True,
+					"msg": "Lmsg",
+					"var": "L"
+				}
+			]
 		},
 		name="NeuroSAT"
 		)
@@ -153,13 +172,13 @@ def build_neurosat(d):
 		)
 	)
 
-	neurosat["gnn"] 					= gnn
-	neurosat["instance_SAT"]			= instance_SAT
-	neurosat["predicted_SAT"] 			= predicted_SAT
-	neurosat["num_vars_on_instance"] 	= num_vars_on_instance
-	neurosat["loss"] 					= loss
-	neurosat["accuracy"] 				= accuracy
-	neurosat["train_step"]				= train_step
+	neurosat["gnn"] = gnn
+	neurosat["instance_SAT"] = instance_SAT
+	neurosat["predicted_SAT"] = predicted_SAT
+	neurosat["num_vars_on_instance"] = num_vars_on_instance
+	neurosat["loss"] = loss
+	neurosat["accuracy"] = accuracy
+	neurosat["train_step"] = train_step
 
 	return neurosat
 #end build_neurosat
@@ -198,17 +217,17 @@ if __name__ == '__main__':
 			epoch_m = 0
 			for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
 
-				sats 	= np.array(batch.sat).astype(int)
-				n_vars 	= np.array(batch.n)
-				M 		= batch.get_sparse_matrix()
+				sats = np.array(batch.sat).astype(int)
+				n_vars = np.array(batch.n)
+				M = batch.get_sparse_matrix()
 
 				n, m =  M[2][0]//2, M[2][1]
 
 				_, loss, accuracy = sess.run( [neurosat["train_step"], neurosat["loss"], neurosat["accuracy"]], feed_dict={
-					neurosat["gnn"].matrix_placeholders["M"]:	M,
-					neurosat["gnn"].time_steps: 				timesteps,
-					neurosat["instance_SAT"]:					sats,
-					neurosat["num_vars_on_instance"]: 			n_vars
+					neurosat["gnn"].matrix_placeholders["M"]: M,
+					neurosat["gnn"].time_steps: timesteps,
+					neurosat["instance_SAT"]: sats,
+					neurosat["num_vars_on_instance"]: n_vars
 					} )
 					
 				epoch_loss += loss

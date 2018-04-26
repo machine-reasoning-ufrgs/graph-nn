@@ -11,7 +11,12 @@ class GraphNN(object):
 		mat,
 		msg,
 		loop,
-		name="GraphNN"
+		name="GraphNN",
+		MLP_weight_initializer = tf.contrib.layers.xavier_initializer,
+		MLP_bias_initializer = tf.zeros_initializer,
+		Cell_activation = tf.nn.relu,
+		Msg_activation = tf.nn.relu,
+		Msg_last_activation = None
 	):
 		"""
 		Receives three dictionaries: var, mat and msg.
@@ -25,15 +30,22 @@ class GraphNN(object):
 		○ msg is a dictionary from function names to variable pairs.
 			That is: an entry msg["cast"] = ("V1","V2") means that one can apply "cast" to convert messages from "V1" to "V2".
 		
-		○ loop is a dictionary from variable names to lists of quadruples:
-			(matrix name, tf function, message name, variable name)
-		or quintuples:
-			(matrix name, tf function, message name, variable name, transpose? )
-
-			That is: an entry loop["V2"] = [ (None,f,None,"V2") ("M",None,"cast","V1",true) ] enforces the following update rule for every timestep:
+		○ loop is a dictionary from variable names to lists of dictionaries:
+			{
+				"mat": the matrix name which will be used,
+				"transpose?": if true then the matrix M will be transposed,
+				"fun": transfer function (python function built using tensorflow operations,
+				"msg": message name,
+				"var": variable name
+			}
+			If "mat" is None, it will be the identity matrix,
+			If "transpose?" is None, it will default to false,
+			if "fun" is None, no function will be applied,
+			If "msg" is false, no message conversion function will be applied,
+			If "var" is false, then [1] will be supplied as a surrogate.
+			
+			That is: an entry loop["V2"] = [ {"mat":None,"fun":f,"var":"V2"}, {"mat":"M","transpose?":true,"msg":"cast","var":"V1"} ] enforces the following update rule for every timestep:
 				V2 ← tf.append( [ f(V2), Mᵀ × cast(V1) ] )
-
-			Note that if a 5th parameter is not supplied, it is overwritten with 'false' (the default is not to transpose the matrix)
 		"""
 		self.var = var
 		self.mat = mat
@@ -42,18 +54,22 @@ class GraphNN(object):
 		self.none_ones = {}
 		for v, f in loop.items():
 			self.loop[v] = []
-			for vals in f:
-				if len( vals ) == 4:
-					_mat, _f, _msg, _var = vals
-					self.loop[v].append( ( _mat, _f, _msg, _var, False ) )
-				elif len( vals ) == 5:
-					_mat, _f, _msg, _var, _transpose = vals
-					self.loop[v].append( ( _mat, _f, _msg, _var, _transpose ) )
-				else:
-					raise Exception( "Loop body definition \"{tuple}\" isn't a 4-tuple or 5-tuple!".format( tuple = vals ) ) # TODO correct exception type
-				#end if
-				if _var is None:
-					self.none_ones[ self.mat[_mat][1] ] = True
+			for f_dict in f:
+				for key in f_dict:
+					if key not in [ "mat", "transpose?", "fun", "msg", "var" ]:
+						raise Exception( "Loop body definition \"{tuple}\" has fields other than the ones allowed!".format( tuple = f ) ) # TODO correct exception type
+					#end if
+				#end for
+				update_dict = {}
+				update_dict["mat"] = f_dict["mat"] if "mat" in f_dict else None
+				update_dict["transpose?"] = f_dict["transpose?"] if "transpose?" in f_dict else False
+				update_dict["fun"] = f_dict["fun"] if "fun" in f_dict else None
+				update_dict["msg"] = f_dict["msg"] if "msg" in f_dict else None
+				update_dict["var"] = f_dict["var"] if "var" in f_dict else None
+				self.loop[v].append( update_dict )
+			#end if
+				if update_dict["var"] is None:
+					self.none_ones[ self.mat[update_dict["mat"]][1] ] = True
 				#end if
 			#end for
 		#end for
@@ -83,10 +99,11 @@ class GraphNN(object):
 		#end for
 		
 		# Hyperparameters
-		self.MLP_weight_initializer = tf.contrib.layers.xavier_initializer
-		self.MLP_bias_initializer = tf.zeros_initializer
-		self.Cell_activation = tf.nn.relu
-		self.Msg_activation = tf.nn.relu
+		self.MLP_weight_initializer = MLP_weight_initializer
+		self.MLP_bias_initializer = MLP_bias_initializer
+		self.Cell_activation = Cell_activation
+		self.Msg_activation = Msg_activation
+		self.Msg_last_activation = Msg_last_activation
 		# Build the network
 		with tf.variable_scope( self.name ):
 			with tf.variable_scope( "placeholders" ) as scope:
@@ -131,7 +148,7 @@ class GraphNN(object):
 			vin, vout = vs
 			self._tf_msgs[msg] = Mlp(
 				layer_sizes = [ self.var[vin] for _ in range(2) ] + [ self.var[vout] ],
-				activations = [ self.Msg_activation for _ in range(2) ] + [ None ],
+				activations = [ self.Msg_activation for _ in range(2) ] + [ self.Msg_last_activation ],
 				name = msg,
 				name_internal_layers = True,
 				kernel_initializer = self.MLP_weight_initializer(),
@@ -185,15 +202,15 @@ class GraphNN(object):
 		new_states = {}
 		for v1 in self.var:
 			inputs = []
-			for m,f,msg,v2,transpose in self.loop[v1]:
-				# vs 			← V
-				# f_vs 			← f(V)
-				# msg_f_vs 		← msg(f(V))
-				# m_msg_f_vs 	← M × msg(f(V))
-				vs 	 		= states[v2].h if v2 is not None else self.none_ones[ self.mat[m][1] ]
-				f_vs 		= f(vs) if f is not None else vs
-				msg_f_vs 	= self._tf_msgs[msg]( f_vs ) if msg is not None else f_vs
-				m_msg_f_vs 	= tf.sparse_tensor_dense_matmul( self.matrix_placeholders[m], msg_f_vs, adjoint_a=transpose ) if m is not None else msg_f_vs
+			for D in self.loop[v1]:
+				# vs ← V ( or [1] )
+				vs = states[D["var"]].h if D["var"] is not None else self.none_ones[ self.mat[ D["mat"] ][1] ]
+				# f_vs ← f(V)
+				f_vs = D["fun"](vs) if D["fun"] is not None else vs
+				# msg_f_vs ← msg(f(V))
+				msg_f_vs = self._tf_msgs[D["msg"]]( f_vs ) if D["msg"] is not None else f_vs
+				# m_msg_f_vs ← M × msg(f(V))
+				m_msg_f_vs = tf.sparse_tensor_dense_matmul( self.matrix_placeholders[ D["mat"] ], msg_f_vs, adjoint_a = D["transpose?"] ) if D["mat"] is not None else msg_f_vs
 				# Finally, append
 				inputs.append( m_msg_f_vs )
 			#end for
