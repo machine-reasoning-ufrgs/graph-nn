@@ -1,6 +1,5 @@
 import tensorflow as tf
 import numpy as np
-import warnings
 
 from mlp import Mlp
 
@@ -77,7 +76,7 @@ class GraphNN(object):
 		
 		for v in self.var:
 			if v not in self.loop:
-				warnings.warn( "Variable \"{v}\" not being updated in the loop!".format( v = v ) ) # TODO correct exception type
+				Exception( "Variable \"{v}\" not being updated in the loop!".format( v = v ) ) # TODO correct exception type
 			#end if
 		#end for
 		for v in self.loop:
