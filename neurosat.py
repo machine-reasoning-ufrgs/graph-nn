@@ -75,8 +75,25 @@ def build_neurosat(d):
 			"Cmsg": ("C","L")
 		},
 		{
-			"L": [(None,INV,None,"L"),("M",None,"Cmsg","C")],
-			"C": [("M",None,"Lmsg","L",True)]
+			"L": [
+				{
+					"fun": INV,
+					"var": "L"
+				},
+				{
+					"mat": "M",
+					"msg": "Cmsg",
+					"var": "C"
+				}
+			],
+			"C": [
+				{
+					"mat": "M",
+					"transpose?": True,
+					"msg": "Lmsg",
+					"var": "L"
+				}
+			]
 		},
 		name="NeuroSAT"
 		)
