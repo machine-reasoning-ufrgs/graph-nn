@@ -1,68 +1,8 @@
 import tensorflow as tf
 import numpy as np
+import warnings
 
-class Mlp(object):
-	def __init__(
-		self,
-		layer_sizes,
-		output_size = None,
-		activations = None,
-		output_activation = None,
-		use_bias = True,
-		kernel_initializer = None,
-		bias_initializer = tf.zeros_initializer(),
-		kernel_regularizer = None,
-		bias_regularizer = None,
-		activity_regularizer = None,
-		kernel_constraint = None,
-		bias_constraint = None,
-		trainable = True,
-		name = None,
-		name_internal_layers = True
-	):
-		"""Stacks len(layer_sizes) dense layers on top of each other, with an additional layer with output_size neurons, if specified."""
-		self.layers = []
-		internal_name = None
-		# If object isn't a list, assume it is a single value that will be repeated for all values
-		if not isinstance( activations, list ):
-			activations = [ activations for _ in layer_sizes ]
-		#end if
-		# If there is one specifically for the output, add it to the list of layers to be built
-		if output_size is not None:
-			layer_sizes = layer_sizes + [output_size]
-			activations = activations + [output_activation]
-		#end if
-		for i, params in enumerate( zip( layer_sizes, activations ) ):
-			size, activation = params
-			if name_internal_layers:
-				internal_name = name + "_MLP_layer_{}".format( i + 1 )
-			#end if
-			new_layer = tf.layers.Dense(
-				size,
-				activation = activation,
-				use_bias = use_bias,
-				kernel_initializer = kernel_initializer,
-				bias_initializer = bias_initializer,
-				kernel_regularizer = kernel_regularizer,
-				bias_regularizer = bias_regularizer,
-				activity_regularizer = activity_regularizer,
-				kernel_constraint = kernel_constraint,
-				bias_constraint = bias_constraint,
-				trainable = trainable,
-				name = internal_name
-			)
-			self.layers.append( new_layer )
-		#end for
-	#end __init__
-	
-	def __call__( self, inputs, *args, **kwargs ):
-		outputs = [ inputs ]
-		for layer in self.layers:
-			outputs.append( layer( outputs[-1] ) )
-		#end for
-		return outputs[-1]
-	#end __call__
-#end Mlp
+from mlp import Mlp
 
 class GraphNN(object):
 	def __init__(
@@ -75,18 +15,25 @@ class GraphNN(object):
 	):
 		"""
 		Receives three dictionaries: var, mat and msg.
-		var is a dictionary from variable names to embedding sizes.
+
+		○ var is a dictionary from variable names to embedding sizes.
 			That is: an entry var["V1"] = 10 means that the variable "V1" will have an embedding size of 10.
-		mat is a dictionary from matrix names to variable pairs.
+		
+		○ mat is a dictionary from matrix names to variable pairs.
 			That is: an entry mat["M"] = ("V1","V2") means that the matrix "M" can be used to mask messages from "V1" to "V2".
-		msg is a dictionary from function names to variable pairs.
+		
+		○ msg is a dictionary from function names to variable pairs.
 			That is: an entry msg["cast"] = ("V1","V2") means that one can apply "cast" to convert messages from "V1" to "V2".
-		loop is a dictionary from variable names to lists of triples ( matrix name, message name, variable name ) or quadruples ( matrix name, message name, variable name, transpose? )
-			That is: an entry loop["V2"] = [ (None, None, "V2"), ("M","cast","V1") ] creates this relation for every timestep: V2 <- tf.append( [ I x id(V2) , M x cast(V1) ] )
-			If a matrix name is None, then the matrix is the identity Matrix.
-			If a message name is None, then the message is the identity function.
-			If a variable name is None, then the variable is a vector of ones.
-			If there is the transpose variable, it must be a boolean whose truth value indicates whether or not the matrix whose name is being called needs to be transposed.
+		
+		○ loop is a dictionary from variable names to lists of quadruples:
+			(matrix name, tf function, message name, variable name)
+		or quintuples:
+			(matrix name, tf function, message name, variable name, transpose? )
+
+			That is: an entry loop["V2"] = [ (None,f,None,"V2") ("M",None,"cast","V1",true) ] enforces the following update rule for every timestep:
+				V2 ← tf.append( [ f(V2), Mᵀ × cast(V1) ] )
+
+			Note that if a 5th parameter is not supplied, it is overwritten with 'false' (the default is not to transpose the matrix)
 		"""
 		self.var = var
 		self.mat = mat
@@ -96,14 +43,14 @@ class GraphNN(object):
 		for v, f in loop.items():
 			self.loop[v] = []
 			for vals in f:
-				if len( vals ) == 3:
-					_mat, _msg, _var = vals
-					self.loop[v].append( ( _mat, _msg, _var, False ) )
-				elif len( vals ) == 4:
-					_mat, _msg, _var, _transpose = vals
-					self.loop[v].append( ( _mat, _msg, _var, _transpose ) )
+				if len( vals ) == 4:
+					_mat, _f, _msg, _var = vals
+					self.loop[v].append( ( _mat, _f, _msg, _var, False ) )
+				elif len( vals ) == 5:
+					_mat, _f, _msg, _var, _transpose = vals
+					self.loop[v].append( ( _mat, _f, _msg, _var, _transpose ) )
 				else:
-					raise Exception( "Loop body definition \"{tuple}\" isn't a 3-tuple or 4-tuple!".format( tuple = vals ) ) # TODO correct exception type
+					raise Exception( "Loop body definition \"{tuple}\" isn't a 4-tuple or 5-tuple!".format( tuple = vals ) ) # TODO correct exception type
 				#end if
 				if _var is None:
 					self.none_ones[ self.mat[_mat][1] ] = True
@@ -114,7 +61,7 @@ class GraphNN(object):
 		
 		for v in self.var:
 			if v not in self.loop:
-				raise Exception( "Variable \"{v}\" not being updated in the loop!".format( v = v ) ) # TODO correct exception type
+				warnings.warn( "Variable \"{v}\" not being updated in the loop!".format( v = v ) ) # TODO correct exception type
 			#end if
 		#end for
 		for v in self.loop:
@@ -134,7 +81,6 @@ class GraphNN(object):
 				raise Exception( "Message maps from an undeclared variable! msg {m} ~ {v1} -> {v2}".format( m = m, v1 = v1, v2 = v2) ) # TODO correct exception type
 			#end if
 		#end for
-		
 		
 		# Hyperparameters
 		self.MLP_weight_initializer = tf.contrib.layers.xavier_initializer
@@ -195,7 +141,6 @@ class GraphNN(object):
 		return
 	#end _init_parameters
 	
-	
 	def _init_util_vars(self):
 		self.num_vars = {}
 		for M, vs in self.mat.items():
@@ -240,17 +185,20 @@ class GraphNN(object):
 		new_states = {}
 		for v1 in self.var:
 			inputs = []
-			for m,f,v2,transpose in self.loop[v1]:
-				vs = states[v2].h if v2 is not None else self.none_ones[ self.mat[m][1] ]
-				fvs = self._tf_msgs[f]( vs ) if f is not None else vs
-				mfvs = tf.sparse_tensor_dense_matmul( self.matrix_placeholders[m], fvs, adjoint_a=transpose ) if m is not None else fvs
-				inputs.append( mfvs )
+			for m,f,msg,v2,transpose in self.loop[v1]:
+				# vs 			← V
+				# f_vs 			← f(V)
+				# msg_f_vs 		← msg(f(V))
+				# m_msg_f_vs 	← M × msg(f(V))
+				vs 	 		= states[v2].h if v2 is not None else self.none_ones[ self.mat[m][1] ]
+				f_vs 		= f(vs) if f is not None else vs
+				msg_f_vs 	= self._tf_msgs[msg]( f_vs ) if msg is not None else f_vs
+				m_msg_f_vs 	= tf.sparse_tensor_dense_matmul( self.matrix_placeholders[m], msg_f_vs, adjoint_a=transpose ) if m is not None else msg_f_vs
+				# Finally, append
+				inputs.append( m_msg_f_vs )
 			#end for
-			if len( inputs ) > 1:
-				v_inputs = tf.concat( inputs, axis = 1 )
-			else:
-				v_inputs = inputs[0]
-			#end if
+			v_inputs = tf.concat( inputs, axis = 1 )
+
 			with tf.variable_scope( "{}_cell".format( v1 ) ):
 				_, v_state = self._tf_cells[ v1 ]( inputs = v_inputs, state = states[v1] )
 				new_states[v1] = v_state

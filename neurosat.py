@@ -3,11 +3,12 @@ import sys, os, time
 import tensorflow as tf
 import numpy as np
 
-from graphnn import GraphNN, Mlp
+from graphnn import GraphNN
 from cnf import CNF
 import instance_loader
 import itertools
 from cnf import create_batchCNF
+from mlp import Mlp
 
 def timestamp():
 
@@ -49,6 +50,17 @@ def build_neurosat(d):
 	# Define placeholder for satisfiability statuses (one per problem)
 	instance_SAT = tf.placeholder( tf.float32, [ None ], name = "instance_SAT" )
 
+	# Define INV, a tf function to exchange positive and negative literal embeddings
+	def INV(Lh):
+		l = tf.shape(Lh)[0]
+		n = tf.div(l,tf.constant(2))
+		# Send messages from negated literals to positive ones, and vice-versa
+		Lh_pos = tf.gather( Lh, tf.range( tf.constant( 0 ), n ) )
+		Lh_neg = tf.gather( Lh, tf.range( n, l ) )
+		Lh_inverted = tf.concat( [ Lh_neg, Lh_pos ], axis = 0 )
+		return Lh_inverted
+	#end
+
 	# Define Graph neural network
 	gnn = GraphNN(
 		{
@@ -56,16 +68,15 @@ def build_neurosat(d):
 			"C": d
 		},
 		{
-			"M": ("L","C"),
-			"Inv": ("L","L")
+			"M": ("L","C")
 		},
 		{
 			"Lmsg": ("L","C"),
 			"Cmsg": ("C","L")
 		},
 		{
-			"L": [("Inv",None,"L"),("M","Cmsg","C")],
-			"C": [("M","Lmsg","L",True)]
+			"L": [(None,INV,None,"L"),("M",None,"Cmsg","C")],
+			"C": [("M",None,"Lmsg","L",True)]
 		},
 		name="NeuroSAT"
 		)
@@ -148,6 +159,7 @@ def build_neurosat(d):
 	neurosat["num_vars_on_instance"] 	= num_vars_on_instance
 	neurosat["loss"] 					= loss
 	neurosat["accuracy"] 				= accuracy
+	neurosat["train_step"]				= train_step
 
 	return neurosat
 #end build_neurosat
@@ -156,7 +168,7 @@ if __name__ == '__main__':
 
 	d 					= 128
 	epochs 				= 20
-	batch_size 			= 64
+	batch_size 			= 32
 	batches_per_epoch 	= 128
 	timesteps 			= 26
 
@@ -184,26 +196,19 @@ if __name__ == '__main__':
 			epoch_accuracy = 0.0
 			epoch_n = 0
 			epoch_m = 0
-			for b, I in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
+			for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
 
-				I_sat = np.array( list( 1 if sat else 0 for sat in I.sat ) )
-				I_n = np.array(I.n)
-				M = I.get_sparse_matrix()
+				sats 	= np.array(batch.sat).astype(int)
+				n_vars 	= np.array(batch.n)
+				M 		= batch.get_sparse_matrix()
 
 				n, m =  M[2][0]//2, M[2][1]
 
-				Inv = (
-					[ (i,n+i) for i in range(n) ] + [ (n+i,i) for i in range(n) ],
-					[ 1 for i in range(2*n)],
-					(2*n,2*n)
-					)
-
-				loss, accuracy = sess.run( [neurosat["loss"], neurosat["accuracy"]], feed_dict={
+				_, loss, accuracy = sess.run( [neurosat["train_step"], neurosat["loss"], neurosat["accuracy"]], feed_dict={
 					neurosat["gnn"].matrix_placeholders["M"]:	M,
-					neurosat["gnn"].matrix_placeholders["Inv"]: Inv,
 					neurosat["gnn"].time_steps: 				timesteps,
-					neurosat["instance_SAT"]:					I_sat,
-					neurosat["num_vars_on_instance"]: 			I_n
+					neurosat["instance_SAT"]:					sats,
+					neurosat["num_vars_on_instance"]: 			n_vars
 					} )
 					
 				epoch_loss += loss
@@ -212,7 +217,7 @@ if __name__ == '__main__':
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m}) | Solver (Loss, Acc): ({loss:.5f}, {accuracy:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Solver (Loss, Acc): ({loss:.5f}, {accuracy:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
