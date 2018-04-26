@@ -1,11 +1,12 @@
-
-
 import sys, os, time
 import tensorflow as tf
 import numpy as np
-
+# Add the parent folder path to the sys.path list for importing
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
+# Import model builder
 from graphnn import GraphNN
 from cnf import CNF
+# Import tools
 import instance_loader
 import itertools
 from cnf import create_batchCNF
