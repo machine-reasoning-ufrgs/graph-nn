@@ -227,7 +227,7 @@ if __name__ == '__main__':
 					#end for
 					S_index.append( (n, n) )
 					T_index.append( (n + g_n - 1, n + g_n - 1) )
-					flow = nx.maximum_flow_value( G, 0, g_n-1 )
+					flow, min_cut = nx.minimum_cut( G, 0, g_n-1 )
 					batch_allowed_flow_error += flow * n_loss_increase_threshold
 					flows.append( flow )
 					n_vars.append( g_n )
@@ -235,7 +235,14 @@ if __name__ == '__main__':
 					m += len( G.edges )
 					g_i += 1
 					# Then create a complementary graph
-					G.add_edge( 0, g_n-1, capacity = 1.0 )
+					g_n = g_n
+					max_n = max( max_n, g_n )
+					G = G
+					a,b = min_cut
+					for s in a:
+						for t in G[s]:
+							if t in b:
+								G[s][t]["capacity"] = 1.0
 					for s, t in G.edges:
 						M_index.append( ( n + s, n + t ) )
 						M_values.append( G[s][t]["capacity"] )
@@ -342,7 +349,7 @@ if __name__ == '__main__':
 			time_steps = test_n
 
 			test_loss = sess.run(
-				[ GNN["loss"] ],
+				GNN["loss"],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].matrix_placeholders["S"]: S,
