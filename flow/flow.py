@@ -200,7 +200,7 @@ if __name__ == '__main__':
 			epoch_m = 0
 			epoch_allowed_flow_error = 0
 			#for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
-			for b in range( batches_per_epoch ):
+			for batch_i in range( batches_per_epoch ):
 				batch_n_size = np.random.randint( n_size_min, n_size+1 )
 				max_n = 0
 				m = 0
@@ -287,7 +287,7 @@ if __name__ == '__main__':
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
-						batch = b,
+						batch = batch_i,
 						loss = loss,
 						allowed = batch_allowed_flow_error,
 						good = loss / batch_allowed_flow_error,
