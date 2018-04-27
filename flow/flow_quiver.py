@@ -63,32 +63,56 @@ def build_network(d):
 	# Define Graph neural network
 	gnn = GraphNN(
 		{
-			"N": d
+			"N": d, # Nodes
+			"E": d  # Edges
 		},
 		{
-			"M": ("N","N"),
-			"S": ("N","N"),
-			"T": ("N","N")
+			"Ms": ("N","E"), # Matrix pointing from nodes to the edges they are sources
+			"Mt": ("N","E"), # Matrix pointing from nodes to the edges they are targets 
+			"Mw": ("E","E"), # Matrix indicating an Edge weight
+			"fS": ("N","N"), # Matrix indicating whether a node is the flow source
+			"fT": ("N","N")  # Matrix indicating whether a node is the flow sink
 		},
 		{
-			"Nmsg": ("N","N")
+			"NsmsgE": ("N","E"), # Message cast to convert messages from node sources to edges
+			"NtmsgE": ("N","E"), # Message cast to convert messages from node targets to edges
+			"EmsgNs": ("N","E"), # Message cast to convert messages from edges to node sources
+			"EmsgNt": ("N","E")  # Message cast to convert messages from edges to node targets
 		},
 		{
 			"N": [
 				{
-					"mat": "M",
-					"var": "N"
+					"mat": "Ms",
+					"msg": "EmsgNs",
+					"var": "E"
 				},
 				{
-					"mat": "M",
+					"mat": "Mt",
+					"msg": "EmsgNt",
+					"var": "E"
+				},
+				{
+					"mat": "fS"
+				},
+				{
+					"mat": "fT"
+				}
+			],
+			"E": [
+				{
+					"mat": "Ms",
 					"transpose?": True,
+					"msg": "NsmsgE",
 					"var": "N"
 				},
 				{
-					"mat": "S"
+					"mat": "Mt",
+					"transpose?": True,
+					"msg": "NtmsgE",
+					"var": "N"
 				},
 				{
-					"mat": "T"
+					"mat": "Mw"
 				}
 			]
 		},
@@ -108,7 +132,7 @@ def build_network(d):
 		)
 
 	# Compute the number of variables
-	n = tf.shape( gnn.matrix_placeholders["M"] )[0]
+	n = tf.shape( gnn.matrix_placeholders["fS"] )[0]
 	# Compute number of problems
 	p = tf.shape( instance_val )[0]
 	# Compute number of variables per instance
@@ -206,10 +230,13 @@ if __name__ == '__main__':
 				m = 0
 				n = 0
 				batch_allowed_flow_error = 0
-				S_index = []
-				T_index = []
-				M_index = []
-				M_values = []
+				
+				fS_index = []
+				fT_index = []
+				Ms_index = []
+				Mt_index = []
+				Mw_index = []
+				Mw_values = []
 				flows = []
 				n_vars = []
 				g_i = 0
@@ -218,15 +245,17 @@ if __name__ == '__main__':
 					g_n = np.random.randint( batch_n_size//2, batch_n_size )
 					max_n = max( max_n, g_n )
 					G = nx.fast_gnp_random_graph( g_n, edge_probability )
-					for s, t in G.edges:
+					for e, (s, t) in enumerate( G.edges ):
 						G[s][t]["capacity"] = np.random.rand()
-						M_index.append( ( n + s, n + t ) )
-						M_values.append( G[s][t]["capacity"] )
-						M_index.append( ( n + t, n + s ) )
-						M_values.append( G[t][s]["capacity"] )
+						Ms_index.append( ( n + s, m + e) )
+						Ms_index.append( ( n + t, m + e ) )
+						Mt_index.append( ( n + s, m + e ) )
+						Mt_index.append( ( n + t, m + e ) )
+						Mw_index.append( ( m + e, m + e ) )
+						Mw_values.append( ( G[s][t]["capacity"] ) )
 					#end for
-					S_index.append( (n, n) )
-					T_index.append( (n + g_n - 1, n + g_n - 1) )
+					fS_index.append( (n, n) )
+					fT_index.append( (n + g_n - 1, n + g_n - 1) )
 					flow, min_cut = nx.minimum_cut( G, 0, g_n-1 )
 					batch_allowed_flow_error += flow * n_loss_increase_threshold
 					flows.append( flow )
@@ -239,18 +268,18 @@ if __name__ == '__main__':
 					max_n = max( max_n, g_n )
 					G = G
 					a,b = min_cut
-					for s in a:
-						for t in G[s]:
-							if t in b:
-								G[s][t]["capacity"] = 1.0
-					for s, t in G.edges:
-						M_index.append( ( n + s, n + t ) )
-						M_values.append( G[s][t]["capacity"] )
-						M_index.append( ( n + t, n + s ) )
-						M_values.append( G[t][s]["capacity"] )
+					for e, (s, t) in enumerate( G.edges ):
+						if ((s in a) and (t in b)) or ((s in b) and (t in a)):
+							G[s][t]["capacity"] = 1.0
+						Ms_index.append( ( n + s, m + e) )
+						Ms_index.append( ( n + t, m + e ) )
+						Mt_index.append( ( n + s, m + e ) )
+						Mt_index.append( ( n + t, m + e ) )
+						Mw_index.append( ( m + e, m + e ) )
+						Mw_values.append( ( G[s][t]["capacity"] ) )
 					#end for
-					S_index.append( (n, n) )
-					T_index.append( (n + g_n - 1, n + g_n - 1) )
+					fS_index.append( (n, n) )
+					fT_index.append( (n + g_n - 1, n + g_n - 1) )
 					flow = nx.maximum_flow_value( G, 0, g_n-1 )
 					batch_allowed_flow_error += flow * n_loss_increase_threshold
 					flows.append( flow )
@@ -259,18 +288,21 @@ if __name__ == '__main__':
 					m += len( G.edges )
 					g_i += 1
 				#end for
-				M_shape = (n,n)
-				M = (M_index, M_values, M_shape)
-				S = (S_index, [1 for _ in S_index], M_shape)
-				T = (T_index, [1 for _ in T_index], M_shape)
+				fS = (fS_index, [1 for _ in fS_index], (n,n))
+				fT = (fT_index, [1 for _ in fT_index], (n,n))
+				Ms = (Ms_index, [1 for _ in Mt_index], (n,m))
+				Mt = (Mt_index, [1 for _ in Mt_index], (n,m))
+				Mw = (Mw_index, Mw_values, (m,m))
 				time_steps = max_n
 
 				_, loss = sess.run(
 					[ GNN["train_step"], GNN["loss"] ],
 					feed_dict = {
-						GNN["gnn"].matrix_placeholders["M"]: M,
-						GNN["gnn"].matrix_placeholders["S"]: S,
-						GNN["gnn"].matrix_placeholders["T"]: T,
+						GNN["gnn"].matrix_placeholders["Ms"]: Ms,
+						GNN["gnn"].matrix_placeholders["Mt"]: Mt,
+						GNN["gnn"].matrix_placeholders["Mw"]: Mw,
+						GNN["gnn"].matrix_placeholders["fS"]: fS,
+						GNN["gnn"].matrix_placeholders["fT"]: fT,
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_val"]: flows,
 						GNN["num_vars_on_instance"]: n_vars
@@ -324,36 +356,44 @@ if __name__ == '__main__':
 			G = nx.fast_gnp_random_graph( test_n, edge_probability )
 			flows = []
 			n_vars = []
-			S_index = []
-			T_index = []
-			M_index = []
-			M_values = []
-			for s, t in G.edges:
+			fS_index = []
+			fT_index = []
+			Ms_index = []
+			Mt_index = []
+			Mw_index = []
+			Mw_values = []
+			for e, (s, t) in enumerate( G.edges ):
 				G[s][t]["capacity"] = np.random.rand()
-				M_index.append( ( s, t ) )
-				M_values.append( G[s][t]["capacity"] )
-				M_index.append( ( t, s ) )
-				M_values.append( G[t][s]["capacity"] )
+				Ms_index.append( ( s, e) )
+				Ms_index.append( ( t, e ) )
+				Mt_index.append( ( s, e ) )
+				Mt_index.append( ( t, e ) )
+				Mw_index.append( ( e, e ) )
+				Mw_values.append( ( G[s][t]["capacity"] ) )
 			#end for
-			S_index.append( (0, 0) )
-			T_index.append( (test_n - 1, test_n - 1) )
+			fS_index.append( (0, 0) )
+			fT_index.append( (test_n - 1, test_n - 1) )
 			flow = nx.maximum_flow_value( G, 0, test_n-1 )
 			test_allowed_flow_error = flow * n_loss_increase_threshold
 			flows.append( flow )
 			n_vars.append( test_n )
 			test_m = len( G.edges )
 			M_shape = (test_n,test_n)
-			M = (M_index, M_values, M_shape)
-			S = (S_index, [1 for _ in S_index], M_shape)
-			T = (T_index, [1 for _ in T_index], M_shape)
+			fS = (fS_index, [1 for _ in fS_index], (test_n,test_n))
+			fT = (fT_index, [1 for _ in fT_index], (test_n,test_n))
+			Ms = (Ms_index, [1 for _ in Mt_index], (test_n,test_m))
+			Mt = (Mt_index, [1 for _ in Mt_index], (test_n,test_m))
+			Mw = (Mw_index, Mw_values, (test_m,test_m))
 			time_steps = test_n
 
 			test_loss = sess.run(
 				GNN["loss"],
 				feed_dict = {
-					GNN["gnn"].matrix_placeholders["M"]: M,
-					GNN["gnn"].matrix_placeholders["S"]: S,
-					GNN["gnn"].matrix_placeholders["T"]: T,
+					GNN["gnn"].matrix_placeholders["Ms"]: Ms,
+					GNN["gnn"].matrix_placeholders["Mt"]: Mt,
+					GNN["gnn"].matrix_placeholders["Mw"]: Mw,
+					GNN["gnn"].matrix_placeholders["fS"]: fS,
+					GNN["gnn"].matrix_placeholders["fT"]: fT,
 					GNN["gnn"].time_steps: time_steps,
 					GNN["instance_val"]: flows,
 					GNN["num_vars_on_instance"]: n_vars
