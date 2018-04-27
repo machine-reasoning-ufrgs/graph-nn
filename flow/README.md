@@ -3,5 +3,5 @@ Neural networks to solve graph flow problems specific code, using the generic gr
 
 # Dependencies:
 
-NetworkX	1.10
+NetworkX	2.1
 
