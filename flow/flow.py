@@ -341,8 +341,8 @@ if __name__ == '__main__':
 			T = (T_index, [1 for _ in T_index], M_shape)
 			time_steps = test_n
 
-			_, test_loss = sess.run(
-				[ GNN["train_step"], GNN["loss"] ],
+			test_loss = sess.run(
+				[ GNN["loss"] ],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].matrix_placeholders["S"]: S,
