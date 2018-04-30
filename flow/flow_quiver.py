@@ -48,6 +48,7 @@ def build_network(d):
 
 	# Define placeholder for result values (one per problem)
 	instance_val = tf.placeholder( tf.float32, [ None ], name = "instance_val" )
+	instance_target = tf.placeholder( tf.int32, [ None ], name = "instance_target" )
 
 	# Define INV, a tf function to exchange positive and negative literal embeddings
 	def INV(Lh):
@@ -135,36 +136,31 @@ def build_network(d):
 	n = tf.shape( gnn.matrix_placeholders["fS"] )[0]
 	# Compute number of problems
 	p = tf.shape( instance_val )[0]
-	# Compute number of variables per instance
-	num_vars_on_instance = tf.placeholder( tf.int32, [ None ], name = "instance_n" )
 
 	# Get the last embeddings
 	N_n = gnn.last_states["N"].h
 	N_vote = N_vote_MLP( N_n )
 
 	# Reorganize votes' result to obtain a prediction for each problem instance
-
-	def _vote_while_cond(i, p, n_acc, n, n_var_list, predicted_val, N_vote):
+	def _vote_while_cond(i, predicted_val):
 		return tf.less( i, p )
 	#end _vote_while_cond
 
-	def _vote_while_body(i, p, n_acc, n, n_var_list, predicted_val, N_vote):
-		# Helper for the amount of variables in this problem
-		i_n = n_var_list[i]
-		# Gather the positive and negative literals for that problem
-		final_node = N_vote[ tf.subtract( tf.add( n_acc, i_n ), 1 ) ]
+	def _vote_while_body(i, predicted_val):
+		# Gather the target node for that problem
+		final_node = N_vote[ instance_target[i] ]
 		# Concatenate positive and negative literals and average their vote values
 		problem_predicted_val = tf.reshape( final_node, shape = [] )
 		# Update TensorArray
 		predicted_val = predicted_val.write( i, problem_predicted_val )
-		return tf.add( i, tf.constant( 1 ) ), p, tf.add( n_acc, i_n ), n, n_var_list, predicted_val, N_vote
+		return tf.add( i, tf.constant( 1 ) ), predicted_val
 	#end _vote_while_body
 			
 	predicted_val = tf.TensorArray( size = p, dtype = tf.float32 )
-	_, _, _, _, _, predicted_val, _ = tf.while_loop(
+	_, predicted_val = tf.while_loop(
 		_vote_while_cond,
 		_vote_while_body,
-		[ tf.constant( 0, dtype = tf.int32 ), p, tf.constant( 0, dtype = tf.int32 ), n, num_vars_on_instance, predicted_val, N_vote ]
+		[ tf.constant( 0, dtype = tf.int32 ), predicted_val ]
 	)
 	predicted_val = predicted_val.stack()
 
@@ -183,24 +179,162 @@ def build_network(d):
 	
 	GNN["gnn"] = gnn
 	GNN["instance_val"] = instance_val
+	GNN["instance_target"] = instance_target
 	GNN["predicted_val"] = predicted_val
-	GNN["num_vars_on_instance"] = num_vars_on_instance
 	GNN["loss"] = loss
 	GNN["train_step"] = train_step
 
 	return GNN
 #end build_network
 
-if __name__ == '__main__':
+def create_graph( g_n, edge_probability, max_multiplier = 2 ):
+	k = np.random.randint( 2, max_multiplier + 1 )
+	# Create the main graph along with a scaled version of it
+	Ms_1_index = []
+	Mt_1_index = []
+	Mw_1_index = []
+	Mw_1_values = []
+	Ms_2_index = []
+	Mt_2_index = []
+	Mw_2_index = []
+	Mw_2_values = []
+	Ms_3_index = []
+	Mt_3_index = []
+	Mw_3_index = []
+	Mw_3_values = []
+	G1 = nx.fast_gnp_random_graph( g_n, edge_probability )
+	G2 = G1.copy()
+	f1_norm = 0
+	f2_norm = 0
+	for e, (s, t) in enumerate( G1.edges ):
+		G1[s][t]["capacity"] = np.random.rand()
+		Ms_1_index.append( (s, e) )
+		Ms_1_index.append( (t, e) )
+		Mt_1_index.append( (s, e) )
+		Mt_1_index.append( (t, e) )
+		Mw_1_index.append( (e, e) )
+		Mw_1_values.append( G1[s][t]["capacity"] )
+		f1_norm += 2 * G1[s][t]["capacity"]
+		G2[s][t]["capacity"] = G1[s][t]["capacity"] * k 
+		Ms_2_index.append( (s, e) )
+		Ms_2_index.append( (t, e) )
+		Mt_2_index.append( (s, e) )
+		Mt_2_index.append( (t, e) )
+		Mw_2_index.append( (e, e) )
+		Mw_2_values.append( G2[s][t]["capacity"] )
+		f2_norm += 2 * G2[s][t]["capacity"]
+	#end for
+	S = np.random.randint( 0, g_n )
+	T = S
+	while T == S:
+		T = np.random.randint( 0, g_n )
+	#end while
+	f1, min_cut = nx.minimum_cut( G1, S, T )
+	f2 = nx.maximum_flow_value( G2, S, T )
+	# Then create a complementary graph with the bottleneck expanded to have maximum capacity
+	G3 = G1
+	A,B = min_cut
+	for s in A:
+		for t in G3[s]:
+			if t in B:
+				G3[s][t]["capacity"] = 1.0
+			#end if
+		#end for
+	#end for
+	f3_norm = 0
+	for e, (s, t) in enumerate( G3.edges ):
+		Ms_3_index.append( (s, e) )
+		Ms_3_index.append( (t, e) )
+		Mt_3_index.append( (s, e) )
+		Mt_3_index.append( (t, e) )
+		Mw_3_index.append( (e, e) )
+		Mw_3_values.append( G3[s][t]["capacity"] )
+		f3_norm += 2 * G3[s][t]["capacity"]
+	#end for
+	f3 = nx.maximum_flow_value( G3, S, T )
+	g_m = len( G1.edges )
+	l1= lambda l: [1 for _ in l]
+	Ms_1 = [Ms_1_index,l1(Ms_1_index),(g_n,g_m)]
+	Mt_1 = [Mt_1_index,l1(Mt_1_index),(g_n,g_m)]
+	Mw_1 = [Mw_1_index,Mw_1_values,(g_m,g_m)]
+	Ms_2 = [Ms_2_index,l1(Ms_2_index),(g_n,g_m)]
+	Mt_2 = [Mt_2_index,l1(Mt_2_index),(g_n,g_m)]
+	Mw_2 = [Mw_2_index,Mw_2_values,(g_m,g_m)]
+	Ms_3 = [Ms_3_index,l1(Ms_3_index),(g_n,g_m)]
+	Mt_3 = [Mt_3_index,l1(Mt_3_index),(g_n,g_m)]
+	Mw_3 = [Mw_3_index,Mw_3_values,(g_m,g_m)]
+	S_mat = [[(S,S)],[1],(g_n,g_n)]
+	T_mat = [[(T,T)],[1],(g_n,g_n)]
+	f1_norm = f1_norm if f1_norm > 0 else 1
+	f2_norm = f2_norm if f2_norm > 0 else 1
+	f3_norm = f3_norm if f3_norm > 0 else 1
+	return ((Ms_1,Mt_1,Mw_1,S_mat,T_mat),f1/f1_norm), ((Ms_2,Mt_2,Mw_2,S_mat,T_mat),f2/f2_norm), ((Ms_3,Mt_3,Mw_3,S_mat,T_mat),f3/f3_norm)
+#end create_graph
 
+def reindex_matrix( n, m, M ):
+	new_index = []
+	new_value = []
+	for i, v in zip( M[0], M[1] ):
+		s, t = i
+		new_index.append( (n + s, m + t) )
+		new_value.append( v )
+	#end for
+	return zip( new_index, new_value )
+
+def create_batch(problems):
+	n = 0
+	m = 0
+	batch_Ms_index = []
+	batch_Ms_value = []
+	batch_Mt_index = []
+	batch_Mt_value = []
+	batch_Mw_index = []
+	batch_Mw_value = []
+	batch_S_index = []
+	batch_S_value = []
+	batch_T_index = []
+	batch_T_value = []
+	for p in problems:
+		Ms, Mt, Mw, S, T = p
+		for i, v in reindex_matrix( n, m, Ms ):
+			batch_Ms_index.append( i )
+			batch_Ms_value.append( v )
+		#end for
+		for i, v in reindex_matrix( n, m, Mt ):
+			batch_Mt_index.append( i )
+			batch_Mt_value.append( v )
+		#end for
+		for i, v in reindex_matrix( m, m, Mw ):
+			batch_Mw_index.append( i )
+			batch_Mw_value.append( v )
+		#end for
+		for i, v in reindex_matrix( n, n, S ):
+			batch_S_index.append( i )
+			batch_S_value.append( v )
+		#end for
+		for i, v in reindex_matrix( n, n, T ):
+			batch_T_index.append( i )
+			batch_T_value.append( v )
+		#end for
+		n += Ms[2][0]
+		m += Ms[2][1]
+	#end for
+	Ms = [batch_Ms_index,batch_Ms_value,(n,m)]
+	Mt = [batch_Mt_index,batch_Mt_value,(n,m)]
+	Mw = [batch_Mw_index,batch_Mw_value,(m,m)]
+	S = [batch_S_index,batch_S_value,(n,n)]
+	T = [batch_T_index,batch_T_value,(n,n)]
+	return (Ms,Mt,Mw,S,T)
+#end create_batch
+
+if __name__ == '__main__':
 	d = 64
 	epochs = 100
-	batch_size = 32
-	batches_per_epoch = 256
-	n_size_min = 16
+	batch_n_max = 4096
+	batches_per_epoch = 32
+	n_size_min = 8
 	n_loss_increase_threshold = 0.01
-	n_size_max = 128
-	test_n = 512
+	n_size_max = 64
 	edge_probability = 0.25
 
 	# Build model
@@ -222,80 +356,37 @@ if __name__ == '__main__':
 			# Run batches
 			#instance_generator.reset()
 			epoch_loss = 0.0
+			epoch_allowed_flow_error = 0
 			epoch_n = 0
 			epoch_m = 0
-			epoch_allowed_flow_error = 0
 			#for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
 			for batch_i in range( batches_per_epoch ):
 				batch_n_size = np.random.randint( n_size_min, n_size+1 )
+				n_acc = 0
 				max_n = 0
-				m = 0
-				n = 0
-				batch_allowed_flow_error = 0
-				
-				fS_index = []
-				fT_index = []
-				Ms_index = []
-				Mt_index = []
-				Mw_index = []
-				Mw_values = []
+				instances = 0
+				Gs = []
 				flows = []
-				n_vars = []
-				g_i = 0
-				while g_i < batch_size:
-					# Create a random graph
-					g_n = np.random.randint( batch_n_size//2, batch_n_size )
-					max_n = max( max_n, g_n )
-					G = nx.fast_gnp_random_graph( g_n, edge_probability )
-					for e, (s, t) in enumerate( G.edges ):
-						G[s][t]["capacity"] = np.random.rand()
-						Ms_index.append( ( n + s, m + e) )
-						Ms_index.append( ( n + t, m + e ) )
-						Mt_index.append( ( n + s, m + e ) )
-						Mt_index.append( ( n + t, m + e ) )
-						Mw_index.append( ( m + e, m + e ) )
-						Mw_values.append( ( G[s][t]["capacity"] ) )
-					#end for
-					fS_index.append( (n, n) )
-					fT_index.append( (n + g_n - 1, n + g_n - 1) )
-					flow, min_cut = nx.minimum_cut( G, 0, g_n-1 )
-					batch_allowed_flow_error += flow * n_loss_increase_threshold
-					flows.append( flow )
-					n_vars.append( g_n )
-					n += g_n
-					m += len( G.edges )
-					g_i += 1
-					# Then create a complementary graph
-					g_n = g_n
-					max_n = max( max_n, g_n )
-					G = G
-					a,b = min_cut
-					for e, (s, t) in enumerate( G.edges ):
-						if ((s in a) and (t in b)) or ((s in b) and (t in a)):
-							G[s][t]["capacity"] = 1.0
-						Ms_index.append( ( n + s, m + e) )
-						Ms_index.append( ( n + t, m + e ) )
-						Mt_index.append( ( n + s, m + e ) )
-						Mt_index.append( ( n + t, m + e ) )
-						Mw_index.append( ( m + e, m + e ) )
-						Mw_values.append( ( G[s][t]["capacity"] ) )
-					#end for
-					fS_index.append( (n, n) )
-					fT_index.append( (n + g_n - 1, n + g_n - 1) )
-					flow = nx.maximum_flow_value( G, 0, g_n-1 )
-					batch_allowed_flow_error += flow * n_loss_increase_threshold
-					flows.append( flow )
-					n_vars.append( g_n )
-					n += g_n
-					m += len( G.edges )
-					g_i += 1
+				while True:
+					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
+					if n_acc + g_n * 3 < batch_n_max:
+						n_acc += g_n * 3
+						instances += 3
+						max_n = max( max_n, g_n )
+						(g1,f1),(g2,f2),(g3,f3) = create_graph( g_n, edge_probability )
+						Gs = Gs + [g1,g2,g3]
+						flows = flows + [f1,f2,f3]
+					else:
+						break
+					#end if
 				#end for
-				fS = (fS_index, [1 for _ in fS_index], (n,n))
-				fT = (fT_index, [1 for _ in fT_index], (n,n))
-				Ms = (Ms_index, [1 for _ in Mt_index], (n,m))
-				Mt = (Mt_index, [1 for _ in Mt_index], (n,m))
-				Mw = (Mw_index, Mw_values, (m,m))
+				Ms, Mt, Mw, S, T = create_batch( Gs )
+				targets = [ t for (t,_) in T[0] ]
 				time_steps = max_n
+				batch_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+				n = Ms[2][0]
+				m = Ms[2][1]
+				
 
 				_, loss = sess.run(
 					[ GNN["train_step"], GNN["loss"] ],
@@ -303,11 +394,11 @@ if __name__ == '__main__':
 						GNN["gnn"].matrix_placeholders["Ms"]: Ms,
 						GNN["gnn"].matrix_placeholders["Mt"]: Mt,
 						GNN["gnn"].matrix_placeholders["Mw"]: Mw,
-						GNN["gnn"].matrix_placeholders["fS"]: fS,
-						GNN["gnn"].matrix_placeholders["fT"]: fT,
+						GNN["gnn"].matrix_placeholders["fS"]: S,
+						GNN["gnn"].matrix_placeholders["fT"]: T,
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_val"]: flows,
-						GNN["num_vars_on_instance"]: n_vars
+						GNN["instance_target"]: targets
 					}
 				)
 				
@@ -317,7 +408,7 @@ if __name__ == '__main__':
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
@@ -327,6 +418,7 @@ if __name__ == '__main__':
 						good = loss / batch_allowed_flow_error,
 						n = n,
 						m = m,
+						i = instances
 					),
 					flush = True
 				)
@@ -354,39 +446,31 @@ if __name__ == '__main__':
 			#end if
 			
 			# TEST TIME
-			# Create a random graph
-			G = nx.fast_gnp_random_graph( test_n, edge_probability )
+			# Create random graphs
+			n_acc = 0
+			max_n = 0
+			instances = 0
+			Gs = []
 			flows = []
-			n_vars = []
-			fS_index = []
-			fT_index = []
-			Ms_index = []
-			Mt_index = []
-			Mw_index = []
-			Mw_values = []
-			for e, (s, t) in enumerate( G.edges ):
-				G[s][t]["capacity"] = np.random.rand()
-				Ms_index.append( ( s, e) )
-				Ms_index.append( ( t, e ) )
-				Mt_index.append( ( s, e ) )
-				Mt_index.append( ( t, e ) )
-				Mw_index.append( ( e, e ) )
-				Mw_values.append( ( G[s][t]["capacity"] ) )
+			while True:
+				g_n = np.random.randint( n_size, n_size*2 )
+				if n_acc + g_n < batch_n_max:
+					n_acc += g_n
+					instances += 1
+					max_n = max( max_n, g_n )
+					(g1,f1),_,_ = create_graph( g_n, edge_probability )
+					Gs.append( g1 )
+					flows.append( f1 )
+				else:
+					break
+				#end if
 			#end for
-			fS_index.append( (0, 0) )
-			fT_index.append( (test_n - 1, test_n - 1) )
-			flow = nx.maximum_flow_value( G, 0, test_n-1 )
-			test_allowed_flow_error = flow * n_loss_increase_threshold
-			flows.append( flow )
-			n_vars.append( test_n )
-			test_m = len( G.edges )
-			M_shape = (test_n,test_n)
-			fS = (fS_index, [1 for _ in fS_index], (test_n,test_n))
-			fT = (fT_index, [1 for _ in fT_index], (test_n,test_n))
-			Ms = (Ms_index, [1 for _ in Mt_index], (test_n,test_m))
-			Mt = (Mt_index, [1 for _ in Mt_index], (test_n,test_m))
-			Mw = (Mw_index, Mw_values, (test_m,test_m))
-			time_steps = test_n
+			Ms, Mt, Mw, S, T = create_batch( Gs )
+			targets = [ t for (t,_) in T[0] ]
+			time_steps = max_n
+			test_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+			test_n = Ms[2][0]
+			test_m = Ms[2][1]
 
 			test_loss = sess.run(
 				GNN["loss"],
@@ -394,15 +478,15 @@ if __name__ == '__main__':
 					GNN["gnn"].matrix_placeholders["Ms"]: Ms,
 					GNN["gnn"].matrix_placeholders["Mt"]: Mt,
 					GNN["gnn"].matrix_placeholders["Mw"]: Mw,
-					GNN["gnn"].matrix_placeholders["fS"]: fS,
-					GNN["gnn"].matrix_placeholders["fT"]: fT,
+					GNN["gnn"].matrix_placeholders["fS"]: S,
+					GNN["gnn"].matrix_placeholders["fT"]: T,
 					GNN["gnn"].time_steps: time_steps,
 					GNN["instance_val"]: flows,
-					GNN["num_vars_on_instance"]: n_vars
+					GNN["instance_target"]: targets
 				}
 			)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Test (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
@@ -412,6 +496,7 @@ if __name__ == '__main__':
 					good = test_loss / test_allowed_flow_error,
 					n = test_n,
 					m = test_m,
+					i = instances
 				),
 				flush = True
 			)
