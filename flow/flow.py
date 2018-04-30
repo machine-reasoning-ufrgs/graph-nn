@@ -48,6 +48,7 @@ def build_network(d):
 
 	# Define placeholder for result values (one per problem)
 	instance_val = tf.placeholder( tf.float32, [ None ], name = "instance_val" )
+	instance_target = tf.placeholder( tf.int32, [ None ], name = "instance_target" )
 
 	# Define INV, a tf function to exchange positive and negative literal embeddings
 	def INV(Lh):
@@ -93,8 +94,7 @@ def build_network(d):
 			]
 		},
 		name="Flow",
-		
-		)
+	)
 
 	# Define L_vote
 	N_vote_MLP = Mlp(
@@ -119,28 +119,25 @@ def build_network(d):
 	N_vote = N_vote_MLP( N_n )
 
 	# Reorganize votes' result to obtain a prediction for each problem instance
-
-	def _vote_while_cond(i, p, n_acc, n, n_var_list, predicted_val, N_vote):
+	def _vote_while_cond(i, predicted_val):
 		return tf.less( i, p )
 	#end _vote_while_cond
 
-	def _vote_while_body(i, p, n_acc, n, n_var_list, predicted_val, N_vote):
-		# Helper for the amount of variables in this problem
-		i_n = n_var_list[i]
-		# Gather the positive and negative literals for that problem
-		final_node = N_vote[ tf.subtract( tf.add( n_acc, i_n ), 1 ) ]
+	def _vote_while_body(i, predicted_val):
+		# Gather the target node for that problem
+		final_node = N_vote[ instance_target[i] ]
 		# Concatenate positive and negative literals and average their vote values
 		problem_predicted_val = tf.reshape( final_node, shape = [] )
 		# Update TensorArray
 		predicted_val = predicted_val.write( i, problem_predicted_val )
-		return tf.add( i, tf.constant( 1 ) ), p, tf.add( n_acc, i_n ), n, n_var_list, predicted_val, N_vote
+		return tf.add( i, tf.constant( 1 ) ), predicted_val
 	#end _vote_while_body
 			
 	predicted_val = tf.TensorArray( size = p, dtype = tf.float32 )
-	_, _, _, _, _, predicted_val, _ = tf.while_loop(
+	_, predicted_val = tf.while_loop(
 		_vote_while_cond,
 		_vote_while_body,
-		[ tf.constant( 0, dtype = tf.int32 ), p, tf.constant( 0, dtype = tf.int32 ), n, num_vars_on_instance, predicted_val, N_vote ]
+		[ tf.constant( 0, dtype = tf.int32 ), predicted_val ]
 	)
 	predicted_val = predicted_val.stack()
 
@@ -159,24 +156,121 @@ def build_network(d):
 	
 	GNN["gnn"] = gnn
 	GNN["instance_val"] = instance_val
+	GNN["instance_target"] = instance_target
 	GNN["predicted_val"] = predicted_val
 	GNN["num_vars_on_instance"] = num_vars_on_instance
 	GNN["loss"] = loss
 	GNN["train_step"] = train_step
-
 	return GNN
 #end build_network
+
+def create_graph( g_n, edge_probability, max_multiplier = 2 ):
+	k = np.random.randint( 2, max_multiplier + 1 )
+	# Create the main graph along with a scaled version of it
+	M1_index = []
+	M1_values = []
+	M2_index = []
+	M2_values = []
+	M3_index = []
+	M3_values = []
+	G1 = nx.fast_gnp_random_graph( g_n, edge_probability )
+	G2 = G1.copy()
+	for s, t in G1.edges:
+		G1[s][t]["capacity"] = np.random.rand()
+		M1_index.append( ( s, t ) )
+		M1_values.append( G1[s][t]["capacity"] )
+		M1_index.append( ( t, s ) )
+		M1_values.append( G1[s][t]["capacity"] )
+		G2[s][t]["capacity"] = G1[s][t]["capacity"] * k 
+		M2_index.append( ( s, t ) )
+		M2_values.append( G2[s][t]["capacity"] )
+		M2_index.append( ( t, s ) )
+		M2_values.append( G2[s][t]["capacity"] )
+	#end for
+	S = np.random.randint( 0, g_n )
+	T = S
+	while T == S:
+		T = np.random.randint( 0, g_n )
+	#end while
+	f1, min_cut = nx.minimum_cut( G1, S, T )
+	f2 = nx.maximum_flow_value( G2, S, T )
+	# Then create a complementary graph with the bottleneck expanded to have maximum capacity
+	G3 = G1
+	A,B = min_cut
+	for s in A:
+		for t in G3[s]:
+			if t in B:
+				G3[s][t]["capacity"] = 1.0
+			#end if
+		#end for
+	#end for
+	for s, t in G3.edges:
+		M3_index.append( ( s, t ) )
+		M3_values.append( G3[s][t]["capacity"] )
+		M3_index.append( ( t, s ) )
+		M3_values.append( G3[s][t]["capacity"] )
+	#end for
+	f3 = nx.maximum_flow_value( G3, S, T )
+	M1 = [M1_index,M1_values,(g_n,g_n)]
+	M2 = [M2_index,M2_values,(g_n,g_n)]
+	M3 = [M3_index,M3_values,(g_n,g_n)]
+	S_mat = [[(S,S)],[1],(g_n,g_n)]
+	T_mat = [[(T,T)],[1],(g_n,g_n)]
+	return ((M1,S_mat,T_mat),f1), ((M2,S_mat,T_mat),f2), ((M3,S_mat,T_mat),f3)
+#end create_graph
+
+def reindex_matrix( n, m, M ):
+	new_index = []
+	new_value = []
+	for i, v in zip( M[0], M[1] ):
+		s, t = i
+		new_index.append( (n + s, n + t) )
+		new_value.append( v )
+	#end for
+	return zip( new_index, new_value )
+
+def create_batch(problems):
+	n = 0
+	m = 0
+	batch_M_index = []
+	batch_M_value = []
+	batch_S_index = []
+	batch_S_value = []
+	batch_T_index = []
+	batch_T_value = []
+	for p in problems:
+		M, S, T = p
+		for i, v in reindex_matrix( n, m, M ):
+			batch_M_index.append( i )
+			batch_M_value.append( v )
+		#end for
+		for i, v in reindex_matrix( n, m, S ):
+			batch_S_index.append( i )
+			batch_S_value.append( v )
+		#end for
+		for i, v in reindex_matrix( n, m, T ):
+			batch_T_index.append( i )
+			batch_T_value.append( v )
+		#end for
+		n += M[2][0]
+		m += len(M[0])
+	#end for
+	M = [batch_M_index,batch_M_value,(n,n)]
+	S = [batch_S_index,batch_S_value,(n,n)]
+	T = [batch_T_index,batch_T_value,(n,n)]
+	return (M,S,T)
+#end create_batch
 
 if __name__ == '__main__':
 
 	d = 64
 	epochs = 100
-	batch_size = 32
+	batch_size = 9
 	batches_per_epoch = 256
-	n_size_min = 16
+	n_size_min = 8
 	n_loss_increase_threshold = 0.01
-	n_size_max = 128
-	test_n = 512
+	n_size_max = 64
+	test_n = 128
 	edge_probability = 0.25
 
 	# Build model
@@ -196,74 +290,32 @@ if __name__ == '__main__':
 			# Run batches
 			#instance_generator.reset()
 			epoch_loss = 0.0
+			epoch_allowed_flow_error = 0
 			epoch_n = 0
 			epoch_m = 0
-			epoch_allowed_flow_error = 0
 			#for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
 			for batch_i in range( batches_per_epoch ):
 				batch_n_size = np.random.randint( n_size_min, n_size+1 )
+				g_i = 0
 				max_n = 0
-				m = 0
-				n = 0
-				batch_allowed_flow_error = 0
-				S_index = []
-				T_index = []
-				M_index = []
-				M_values = []
+				Gs = []
 				flows = []
 				n_vars = []
-				g_i = 0
 				while g_i < batch_size:
-					# Create a random graph
-					g_n = np.random.randint( batch_n_size//2, batch_n_size )
-					max_n = max( max_n, g_n )
-					G = nx.fast_gnp_random_graph( g_n, edge_probability )
-					for s, t in G.edges:
-						G[s][t]["capacity"] = np.random.rand()
-						M_index.append( ( n + s, n + t ) )
-						M_values.append( G[s][t]["capacity"] )
-						M_index.append( ( n + t, n + s ) )
-						M_values.append( G[t][s]["capacity"] )
-					#end for
-					S_index.append( (n, n) )
-					T_index.append( (n + g_n - 1, n + g_n - 1) )
-					flow, min_cut = nx.minimum_cut( G, 0, g_n-1 )
-					batch_allowed_flow_error += flow * n_loss_increase_threshold
-					flows.append( flow )
+					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
 					n_vars.append( g_n )
-					n += g_n
-					m += len( G.edges )
-					g_i += 1
-					# Then create a complementary graph
-					g_n = g_n
 					max_n = max( max_n, g_n )
-					G = G
-					a,b = min_cut
-					for s in a:
-						for t in G[s]:
-							if t in b:
-								G[s][t]["capacity"] = 1.0
-					for s, t in G.edges:
-						M_index.append( ( n + s, n + t ) )
-						M_values.append( G[s][t]["capacity"] )
-						M_index.append( ( n + t, n + s ) )
-						M_values.append( G[t][s]["capacity"] )
-					#end for
-					S_index.append( (n, n) )
-					T_index.append( (n + g_n - 1, n + g_n - 1) )
-					flow = nx.maximum_flow_value( G, 0, g_n-1 )
-					batch_allowed_flow_error += flow * n_loss_increase_threshold
-					flows.append( flow )
-					n_vars.append( g_n )
-					n += g_n
-					m += len( G.edges )
-					g_i += 1
+					(g1,f1),(g2,f2),(g3,f3) = create_graph( g_n, edge_probability )
+					Gs = Gs + [g1,g2,g3]
+					flows = flows + [f1,f2,f3]
+					g_i += 3
 				#end for
-				M_shape = (n,n)
-				M = (M_index, M_values, M_shape)
-				S = (S_index, [1 for _ in S_index], M_shape)
-				T = (T_index, [1 for _ in T_index], M_shape)
+				M, S, T = create_batch( Gs )
+				targets = [ t for (t,_) in T[0] ]
 				time_steps = max_n
+				batch_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+				n = M[2][0]
+				m = len( M[0] )
 
 				_, loss = sess.run(
 					[ GNN["train_step"], GNN["loss"] ],
@@ -273,6 +325,7 @@ if __name__ == '__main__':
 						GNN["gnn"].matrix_placeholders["T"]: T,
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_val"]: flows,
+						GNN["instance_target"]: targets,
 						GNN["num_vars_on_instance"]: n_vars
 					}
 				)
@@ -321,32 +374,14 @@ if __name__ == '__main__':
 			
 			# TEST TIME
 			# Create a random graph
-			G = nx.fast_gnp_random_graph( test_n, edge_probability )
-			flows = []
-			n_vars = []
-			S_index = []
-			T_index = []
-			M_index = []
-			M_values = []
-			for s, t in G.edges:
-				G[s][t]["capacity"] = np.random.rand()
-				M_index.append( ( s, t ) )
-				M_values.append( G[s][t]["capacity"] )
-				M_index.append( ( t, s ) )
-				M_values.append( G[t][s]["capacity"] )
-			#end for
-			S_index.append( (0, 0) )
-			T_index.append( (test_n - 1, test_n - 1) )
-			flow = nx.maximum_flow_value( G, 0, test_n-1 )
-			test_allowed_flow_error = flow * n_loss_increase_threshold
-			flows.append( flow )
+			(G1,f), _, _ = create_graph( test_n, edge_probability )
+			test_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+			flows = [f]
 			n_vars.append( test_n )
-			test_m = len( G.edges )
-			M_shape = (test_n,test_n)
-			M = (M_index, M_values, M_shape)
-			S = (S_index, [1 for _ in S_index], M_shape)
-			T = (T_index, [1 for _ in T_index], M_shape)
+			test_m = len( G1[0] )
+			M, S, T = G1[:3]
 			time_steps = test_n
+			targets = [ t for (t,_) in T[0] ]
 
 			test_loss = sess.run(
 				GNN["loss"],
@@ -356,6 +391,7 @@ if __name__ == '__main__':
 					GNN["gnn"].matrix_placeholders["T"]: T,
 					GNN["gnn"].time_steps: time_steps,
 					GNN["instance_val"]: flows,
+					GNN["instance_target"]: targets,
 					GNN["num_vars_on_instance"]: n_vars
 				}
 			)
