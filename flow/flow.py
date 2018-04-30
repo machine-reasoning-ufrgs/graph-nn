@@ -265,7 +265,7 @@ if __name__ == '__main__':
 
 	d = 64
 	epochs = 100
-	batch_size = 9
+	batch_n_max = 4096
 	batches_per_epoch = 256
 	n_size_min = 8
 	n_loss_increase_threshold = 0.01
@@ -296,19 +296,23 @@ if __name__ == '__main__':
 			#for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
 			for batch_i in range( batches_per_epoch ):
 				batch_n_size = np.random.randint( n_size_min, n_size+1 )
-				g_i = 0
+				n_acc = 0
 				max_n = 0
 				Gs = []
 				flows = []
 				n_vars = []
-				while g_i < batch_size:
+				while True:
 					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
-					n_vars.append( g_n )
-					max_n = max( max_n, g_n )
-					(g1,f1),(g2,f2),(g3,f3) = create_graph( g_n, edge_probability )
-					Gs = Gs + [g1,g2,g3]
-					flows = flows + [f1,f2,f3]
-					g_i += 3
+					n_acc += g_n * 3
+					if n_acc < batch_n_max:
+						n_vars.append( g_n )
+						max_n = max( max_n, g_n )
+						(g1,f1),(g2,f2),(g3,f3) = create_graph( g_n, edge_probability )
+						Gs = Gs + [g1,g2,g3]
+						flows = flows + [f1,f2,f3]
+					else:
+						break
+					#end if
 				#end for
 				M, S, T = create_batch( Gs )
 				targets = [ t for (t,_) in T[0] ]
