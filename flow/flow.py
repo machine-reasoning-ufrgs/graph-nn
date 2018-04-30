@@ -298,13 +298,15 @@ if __name__ == '__main__':
 				batch_n_size = np.random.randint( n_size_min, n_size+1 )
 				n_acc = 0
 				max_n = 0
+				instances = 0
 				Gs = []
 				flows = []
 				n_vars = []
 				while True:
 					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
-					n_acc += g_n * 3
-					if n_acc < batch_n_max:
+					if n_acc + g_n * 3 < batch_n_max:
+						n_acc += g_n * 3
+						instances += 3
 						n_vars.append( g_n )
 						max_n = max( max_n, g_n )
 						(g1,f1),(g2,f2),(g3,f3) = create_graph( g_n, edge_probability )
@@ -340,7 +342,7 @@ if __name__ == '__main__':
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
@@ -350,6 +352,7 @@ if __name__ == '__main__':
 						good = loss / batch_allowed_flow_error,
 						n = n,
 						m = m,
+						i = instances
 					),
 					flush = True
 				)
