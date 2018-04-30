@@ -207,7 +207,9 @@ if __name__ == '__main__':
 	print( "{timestamp}\t{memory}\tBuilding model ...".format( timestamp = timestamp(), memory = memory_usage() ) )
 	GNN = build_network(d)
 
-	with tf.Session() as sess:
+	# Disallow GPU use
+	config = tf.ConfigProto( device_count = {"GPU":0})
+	with tf.Session(config=config) as sess:
 		
 		# Initialize global variables
 		print( "{timestamp}\t{memory}\tInitializing global variables ... ".format( timestamp = timestamp(), memory = memory_usage() ) )
