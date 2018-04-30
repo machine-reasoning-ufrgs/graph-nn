@@ -266,7 +266,7 @@ if __name__ == '__main__':
 	d = 64
 	epochs = 100
 	batch_n_max = 4096
-	batches_per_epoch = 256
+	batches_per_epoch = 32
 	n_size_min = 8
 	n_loss_increase_threshold = 0.01
 	n_size_max = 64
@@ -385,11 +385,11 @@ if __name__ == '__main__':
 			test_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
 			flows = [f]
 			n_vars.append( test_n )
-			test_m = len( G1[0] )
-			M, S, T = G1[:3]
+			M, S, T = G1
 			time_steps = test_n
 			targets = [ t for (t,_) in T[0] ]
-
+			test_m = len( M[0] )
+			
 			test_loss = sess.run(
 				GNN["loss"],
 				feed_dict = {
