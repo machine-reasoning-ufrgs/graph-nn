@@ -6,7 +6,7 @@ from constraint import *
 # Add the parent folder path to the sys.path list for importing
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 # Import model builder
-from graphnn_v2 import GraphNN
+from graphnn import GraphNN
 from mlp import Mlp
 from instance_loader import InstanceLoader
 # Import tools
@@ -34,46 +34,45 @@ def build_network(d):
 
 	# Define placeholder for result values (one per problem)
 	instance_colorability = tf.placeholder( tf.float32, [ None ], name = "instance_colorability" )
-	instance_target = tf.placeholder( tf.int32, [ None ], name = "instance_target" )
 
 	# Define Graph neural network
 	gnn = GraphNN(
 		{
-			"V": d,
-			"C": d
+			"V": d#,
+			#"C": d
 		},
 		{
-			"M_VV": {"vars": ("V","V"), "compute?": False},
-			"M_VC": {"vars": ("V","C"), "compute?": False}
+			"M_VV": ("V","V")#,
+			#"M_VC": {"vars": ("V","C"), "compute?": False}
 			#"M_VC_mask": {"vars": ("V","C"), "compute?": False}
 		},
 		{
-			"Cmsg": ("C","V"),
-			"Vmsg": ("V","C")
+			#"Cmsg": ("C","V"),
+			#"Vmsg": ("V","C")
 		},
 		{
 			"V": [
 				{
 					"mat": "M_VV",
 					"var": "V"
-				},
-				{
-					"mat": "M_VC",
-					"var": "C",
-					"msg": "Cmsg"
-				}
-			],
-			"C": [
-				{
-					"var": "C"
-				},
-				{
-					"mat": "M_VC",
-					"transpose?": True,
-					"var": "V",
-					"msg": "Vmsg"
-				}
-			]
+				}#,
+				#{
+				#	"mat": "M_VC",
+				#	"var": "C",
+				#	"msg": "Cmsg"
+				#}
+			]#,
+			#"C": [
+			#	{
+			#		"var": "C"
+			#	},
+			#	{
+			#		"mat": "M_VC",
+			#		"transpose?": True,
+			#		"var": "V",
+			#		"msg": "Vmsg"
+			#	}
+			#]
 		},
 		name="Coloring",
 	)
@@ -124,17 +123,17 @@ def build_network(d):
 	predicted_colorability = predicted_colorability.stack()
 
 	# Define loss, optimizer, train step
-	predict_costs = tf.nn.sigmoid_cross_entropy_with_logits( labels = instance_colorability, logits = predicted_colorability )
-	predict_cost = tf.reduce_mean( predict_costs )
-	vars_cost = tf.zeros([])
-	tvars = tf.trainable_variables()
+	predict_costs 	= tf.nn.sigmoid_cross_entropy_with_logits( labels = instance_colorability, logits = predicted_colorability )
+	predict_cost 	= tf.reduce_mean( predict_costs )
+	vars_cost 		= tf.zeros([])
+	tvars 			= tf.trainable_variables()
 	for var in tvars:
 		vars_cost = tf.add( vars_cost, tf.nn.l2_loss( var ) )
 	#end for
-	loss = tf.add( predict_cost, tf.multiply( vars_cost, parameter_l2norm_scaling ) )
-	optimizer = tf.train.AdamOptimizer( name = "Adam", learning_rate = learning_rate )
-	grads, _ = tf.clip_by_global_norm( tf.gradients( loss, tvars ), global_norm_gradient_clipping_ratio )
-	train_step = optimizer.apply_gradients( zip( grads, tvars ) )
+	loss 		= tf.add( predict_cost, tf.multiply( vars_cost, parameter_l2norm_scaling ) )
+	optimizer 	= tf.train.AdamOptimizer( name = "Adam", learning_rate = learning_rate )
+	grads, _ 	= tf.clip_by_global_norm( tf.gradients( loss, tvars ), global_norm_gradient_clipping_ratio )
+	train_step 	= optimizer.apply_gradients( zip( grads, tvars ) )
 
 	# Define accuracy
 	acc = tf.reduce_mean(
@@ -151,52 +150,12 @@ def build_network(d):
 	#GNN["k"]						= gnn.num_vars["C"]
 	GNN["n_vertices"]				= n_vertices
 	GNN["instance_colorability"] 	= instance_colorability
-	GNN["predicted_colorability"] 	= tf.cast( tf.round( tf.nn.sigmoid( predicted_colorability ) ), tf.int32)
+	GNN["predicted_colorability"] 	= tf.nn.sigmoid( predicted_colorability )
 	GNN["loss"] 					= loss
 	GNN["acc"]						= acc
 	GNN["train_step"] 				= train_step
 	return GNN
 #end build_networks
-
-def create_graph_pair(n,k):
-	"""
-		Starts with a disjoint set of n vertices (zero edges). Iteratively
-		adds edges selected uniformly at random while the resulting graph
-		admits a k-coloring. The penultimate and last of such graphs, which
-		differ only by a single edge, are respectively k-colorable and not
-		k-colorable.
-	"""
-	k_colorable = True
-	M1 = np.zeros((n,n),dtype=int)
-	M2 = np.zeros((n,n),dtype=int)
-	while k_colorable:
-		
-		# Choose (and add) an edge uniformly at random
-		a,b = random.choice([ (i,j) for i in range(n) for j in range(n) if i != j and M1[i,j]==0])
-		M2[a,b] = 1
-
-		# Create a CSP problem with n integer variables each of which can assume k different values ("colors")
-		problem = Problem()
-		problem.addVariables(range(n), range(k))
-		for i in range(n):
-			for j in range(n):
-				if M2[i,j] == 1:
-					# Add one constraint for each edge
-					problem.addConstraint(lambda a,b: a != b, (i,j))
-				#end
-			#end
-		#end
-
-		# Check if k-colorable
-		k_colorable = problem.getSolution() is not None
-
-		if k_colorable:
-			M1[a,b] = 1
-		#end
-	#end
-
-	return M1, M2
-#end
 
 def dense_to_sparse( M ):
 	n, m = M.shape
@@ -219,9 +178,7 @@ if __name__ == '__main__':
 	epochs 				= 100
 	batch_size			= 32
 	batches_per_epoch 	= 128
-	time_steps 			= 26
-	n 					= 40
-	k 					= 3
+	time_steps 			= 200
 
 	# Build model
 	print( "{timestamp}\t{memory}\tBuilding model ...".format( timestamp = timestamp(), memory = memory_usage() ) )
@@ -265,7 +222,7 @@ if __name__ == '__main__':
 						#GNN["k"]: k,
 						GNN["n_vertices"]: n_vertices,
 						GNN["gnn"].matrix_placeholders["M_VV"]: dense_to_sparse(M_VV),
-						GNN["gnn"].matrix_placeholders["M_VC"]: dense_to_sparse(M_VC),
+						#GNN["gnn"].matrix_placeholders["M_VC"]: dense_to_sparse(M_VC),
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_colorability"]: k_colorable
 					}
@@ -274,6 +231,8 @@ if __name__ == '__main__':
 				epoch_loss += loss
 				epoch_acc += acc
 				
+				#print(np.round(predictions,3))
+				#print(k_colorable)
 				print(
 					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (|V|,|E|,instances): ({V},{E},{i})\t| (Loss,Acc): ({loss:.5f},{acc:.5f})".format(
 						timestamp = timestamp(),
@@ -284,7 +243,7 @@ if __name__ == '__main__':
 						acc = acc,
 						V = M_VV.shape[0],
 						E = len(np.nonzero(M_VV)[0]),
-						i = 2*batch_size
+						i = batch_size
 					),
 					flush = True
 				)
@@ -330,7 +289,7 @@ if __name__ == '__main__':
 						#GNN["k"]: k,
 						GNN["n_vertices"]: n_vertices,
 						GNN["gnn"].matrix_placeholders["M_VV"]: dense_to_sparse(M_VV),
-						GNN["gnn"].matrix_placeholders["M_VC"]: dense_to_sparse(M_VC),
+						#GNN["gnn"].matrix_placeholders["M_VC"]: dense_to_sparse(M_VC),
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_colorability"]: k_colorable
 					}

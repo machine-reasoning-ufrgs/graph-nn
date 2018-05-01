@@ -28,7 +28,7 @@ def create_graph_pair(n,k):
 			for j in range(n):
 				if M2[i,j] == 1:
 					# Add one constraint for each edge
-					problem.addConstraint(lambda a,b: a != b, (i,j))
+					problem.addConstraint(lambda x,y: x != y, (i,j))
 				#end
 			#end
 		#end
@@ -74,34 +74,12 @@ def create_dataset(n, samples = 1000, path="instances"):
 
 	for i in range(samples//2):
 		# Select a random k ~ Bernouilli(0.3) + Geo(0.4)
-		k = random.choice(range(2,5+1))
+		k = 3 #random.choice(range(2,5+1))
 		print("Creating instances pair with k={}".format(k))
 		M1, M2 = create_graph_pair(n,k)
 		write_graph(M1,k,0,"{}/{}.graph".format(path,2*i))
 		write_graph(M2,k,1,"{}/{}.graph".format(path,2*i+1))
 	#end for
-#end
-
-def generate(n, batch_size):
-
-	k_colorable, k_uncolorable = [], []
-	for i in range(batch_size//2):
-		M1,M2 = create_graph_pair(n,k)
-		k_colorable.append(M1)
-		k_uncolorable.append(M2)
-	#end
-
-	features 	= np.zeros((batch_size,n,n))
-	labels 		= np.zeros((batch_size,))
-
-	for i in range(batch_size//2):
-		features[2*i,  :,:] = k_colorable[i]
-		features[2*i+1,:,:] = k_uncolorable[i]
-		labels[2*i] = 1
-		labels[2*i+1] = 0
-	#end
-
-	yield features, labels
 #end
 
 if __name__ == '__main__':
