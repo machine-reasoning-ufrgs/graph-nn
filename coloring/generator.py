@@ -74,8 +74,8 @@ def create_dataset(n, samples = 1000, path="instances"):
 
 	for i in range(samples//2):
 		# Select a random k ~ Bernouilli(0.3) + Geo(0.4)
-		k = np.random.binomial(1,0.4) + np.random.geometric(0.4)
-		#k = 3
+		k = random.choice(range(2,5+1))
+		print("Creating instances pair with k={}".format(k))
 		M1, M2 = create_graph_pair(n,k)
 		write_graph(M1,k,0,"{}/{}.graph".format(path,2*i))
 		write_graph(M2,k,1,"{}/{}.graph".format(path,2*i+1))
@@ -105,6 +105,6 @@ def generate(n, batch_size):
 #end
 
 if __name__ == '__main__':
-	create_dataset(40, samples = 32*128, path = "train")
-	create_dataset(40, samples = 32*128, path = "test")
+	create_dataset(20, samples = 32*128, path = "train")
+	create_dataset(20, samples = 32*128, path = "test")
 #end

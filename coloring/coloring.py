@@ -6,7 +6,7 @@ from constraint import *
 # Add the parent folder path to the sys.path list for importing
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 # Import model builder
-from graphnn import GraphNN
+from graphnn_v2 import GraphNN
 from mlp import Mlp
 from instance_loader import InstanceLoader
 # Import tools
@@ -44,7 +44,8 @@ def build_network(d):
 		},
 		{
 			"M_VV": {"vars": ("V","V"), "compute?": False},
-			"M_VC": {"vars": ("V","C"), "compute?": True}
+			"M_VC": {"vars": ("V","C"), "compute?": False}
+			#"M_VC_mask": {"vars": ("V","C"), "compute?": False}
 		},
 		{
 			"Cmsg": ("C","V"),
@@ -147,7 +148,7 @@ def build_network(d):
 		)
 	
 	GNN["gnn"] 						= gnn
-	GNN["k"]						= gnn.num_vars["C"]
+	#GNN["k"]						= gnn.num_vars["C"]
 	GNN["n_vertices"]				= n_vertices
 	GNN["instance_colorability"] 	= instance_colorability
 	GNN["predicted_colorability"] 	= tf.cast( tf.round( tf.nn.sigmoid( predicted_colorability ) ), tf.int32)
@@ -247,14 +248,24 @@ if __name__ == '__main__':
 			epoch_acc = 0.0
 			for (batch_i,batch) in enumerate(itertools.islice(train_generator.get_batches(batch_size), batches_per_epoch)):
 
-				M, n_vertices, k, k_colorable = batch
+				M_VV, n_vertices, k, k_colorable = batch
+
+				n_total = M_VV.shape[0]
+				k_max = max(k)
+
+				M_VC = np.zeros((n_total,k_max))
+				for i in range(batch_size):
+					n_acc = sum(n_vertices[:i])
+					M_VC[n_acc:n_acc+n_vertices[i], 0:k[i]] = 1
+				#end
 
 				_, loss, acc, predictions = sess.run(
 					[ GNN["train_step"], GNN["loss"], GNN["acc"], GNN["predicted_colorability"] ],
 					feed_dict = {
-						GNN["k"]: k,
+						#GNN["k"]: k,
 						GNN["n_vertices"]: n_vertices,
-						GNN["gnn"].matrix_placeholders["M_VV"]: dense_to_sparse(M),
+						GNN["gnn"].matrix_placeholders["M_VV"]: dense_to_sparse(M_VV),
+						GNN["gnn"].matrix_placeholders["M_VC"]: dense_to_sparse(M_VC),
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_colorability"]: k_colorable
 					}
@@ -271,8 +282,8 @@ if __name__ == '__main__':
 						batch = batch_i,
 						loss = loss,
 						acc = acc,
-						V = M.shape[0],
-						E = len(np.nonzero(M)[0]),
+						V = M_VV.shape[0],
+						E = len(np.nonzero(M_VV)[0]),
 						i = 2*batch_size
 					),
 					flush = True
@@ -289,7 +300,7 @@ if __name__ == '__main__':
 					batch = "all",
 					loss = epoch_loss,
 					V = n,
-					E = len(np.nonzero(M)[0]),
+					E = len(np.nonzero(M_VV)[0]),
 					acc = epoch_acc
 				),
 				flush = True
@@ -302,14 +313,24 @@ if __name__ == '__main__':
 			epoch_acc = 0.0
 			for (batch_i,batch) in enumerate(itertools.islice(test_generator.get_batches(batch_size), batches_per_epoch)):
 
-				M, n_vertices, k, k_colorable = batch
+				M_VV, n_vertices, k, k_colorable = batch
+
+				n_total = M_VV.shape[0]
+				k_max = max(k)
+
+				M_VC = np.zeros((n_total,k_max))
+				for i in range(batch_size):
+					n_acc = sum(n_vertices[:i])
+					M_VC[n_acc:n_acc+n_vertices[i], 0:k[i]] = 1
+				#end
 
 				loss, acc = sess.run(
 					[ GNN["loss"], GNN["acc"] ],
 					feed_dict = {
-						GNN["k"]: k,
+						#GNN["k"]: k,
 						GNN["n_vertices"]: n_vertices,
-						GNN["gnn"].matrix_placeholders["M_VV"]: dense_to_sparse(M),
+						GNN["gnn"].matrix_placeholders["M_VV"]: dense_to_sparse(M_VV),
+						GNN["gnn"].matrix_placeholders["M_VC"]: dense_to_sparse(M_VC),
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_colorability"]: k_colorable
 					}
@@ -329,7 +350,7 @@ if __name__ == '__main__':
 					batch = "all",
 					loss = epoch_loss,
 					V = n,
-					E = len(np.nonzero(M)[0]),
+					E = len(np.nonzero(M_VV)[0]),
 					acc = epoch_acc
 				),
 				flush = True
