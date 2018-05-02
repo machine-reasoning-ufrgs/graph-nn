@@ -200,9 +200,9 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 	if not nx.has_path( G1, S, T ):
 		return None
 	#end if
-	path = nx.shortest_path( G1, S, T )
-	f1 = nx.shortest_path_length( G1, S, T )
-	f2 = nx.shortest_path_length( G2, S, T )
+	path = nx.shortest_path( G1, S, T, "distance" )
+	f1 = nx.shortest_path_length( G1, S, T, "distance" )
+	f2 = nx.shortest_path_length( G2, S, T, "distance" )
 	# Then create a complementary graph with the shortest path removed
 	G3 = G1.copy()
 	for node in path:
@@ -221,7 +221,7 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 		M3_values.append( 1 / ( 1 + G3[s][t]["distance"] ) )
 		f3_norm += 2 * G3[s][t]["distance"]
 	#end for
-	f3 = nx.shortest_path_length( G3, S, T )
+	f3 = nx.shortest_path_length( G3, S, T, "distance" )
 	M1 = [M1_index,M1_values,(g_n,g_n)]
 	M2 = [M2_index,M2_values,(g_n,g_n)]
 	M3 = [M3_index,M3_values,(g_n,g_n)]
