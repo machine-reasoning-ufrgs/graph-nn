@@ -90,6 +90,7 @@ def build_network(d):
 			]
 		},
 		name="Dijkstra",
+		float_dype = tf.float32
 	)
 
 	# Define L_vote

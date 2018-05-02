@@ -94,6 +94,7 @@ def build_network(d):
 			]
 		},
 		name="Flow",
+		float_dype = tf.float32
 	)
 
 	# Define L_vote

@@ -13,7 +13,8 @@ class GraphNN(object):
 		MLP_bias_initializer = tf.zeros_initializer,
 		Cell_activation = tf.nn.relu,
 		Msg_activation = tf.nn.relu,
-		Msg_last_activation = None
+		Msg_last_activation = None,
+		float_dtype = tf.float32
 	):
 		"""
 		Receives three dictionaries: var, mat and msg.
@@ -44,6 +45,7 @@ class GraphNN(object):
 			That is: an entry loop["V2"] = [ {"mat":None,"fun":f,"var":"V2"}, {"mat":"M","transpose?":true,"msg":"cast","var":"V1"} ] enforces the following update rule for every timestep:
 				V2 ← tf.append( [ f(V2), Mᵀ × cast(V1) ] )
 		"""
+		self.float_dtype = float_dtype
 		self.var = var
 		self.mat = mat
 		self.msg = msg
@@ -119,7 +121,7 @@ class GraphNN(object):
 	def _init_placeholders(self):
 		self.matrix_placeholders = {}
 		for m in self.mat:
-			self.matrix_placeholders[m] = tf.sparse_placeholder( tf.float32, shape = [ None, None ], name = m )
+			self.matrix_placeholders[m] = tf.sparse_placeholder( self.float_dtype, shape = [ None, None ], name = m )
 		#end for
 		self.time_steps = tf.placeholder( tf.int32, shape = (), name = "time_steps" )
 		return
@@ -129,7 +131,7 @@ class GraphNN(object):
 		# Init embeddings
 		self._tf_inits = {}
 		for v, d in self.var.items():
-			self._tf_inits[v] = tf.get_variable( "{}_init".format( v ), [ 1, d ], dtype = tf.float32 )
+			self._tf_inits[v] = tf.get_variable( "{}_init".format( v ), [ 1, d ], dtype = self.float_dtype )
 		#end for
 		# Init LSTM cells
 		self._tf_cells = {}
@@ -179,10 +181,10 @@ class GraphNN(object):
 		cell_state = {}
 		for v, init in self._tf_inits.items():
 			cell_h0 = tf.tile( init, [ self.num_vars[v], 1 ] )
-			cell_c0 = tf.zeros_like( cell_h0, dtype = tf.float32 )
+			cell_c0 = tf.zeros_like( cell_h0, dtype = self.float_dtype )
 			cell_state[v] = tf.contrib.rnn.LSTMStateTuple( h = cell_h0, c = cell_c0 )
 			if v in self.none_ones:
-				self.none_ones[v] = tf.ones( [ self.num_vars[v], 1 ], dtype = tf.float32, name = "1_{}".format( v ) )
+				self.none_ones[v] = tf.ones( [ self.num_vars[v], 1 ], dtype = self.float_dtype, name = "1_{}".format( v ) )
 			#end if
 		#end for
 		
