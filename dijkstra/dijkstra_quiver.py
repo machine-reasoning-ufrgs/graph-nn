@@ -160,11 +160,11 @@ def build_network(d):
 	)
 	predicted_val = predicted_val.stack()
 
-	# Define loss, accuracy
+	# Define loss and %error
 	predict_costs = tf.losses.mean_squared_error( labels = instance_val, predictions = predicted_val )
 	predict_cost = tf.reduce_mean( predict_costs )
-	# "Accuracy"
-	accuracy = tf.reduce_mean( tf.divide( tf.subtract( instance_val, predicted_val ), predicted_val ) )
+	# "%Error"
+	error = tf.reduce_mean( tf.divide( tf.subtract( instance_val, predicted_val ), predicted_val ) )
 	vars_cost = tf.zeros([])
 	tvars = tf.trainable_variables()
 	for var in tvars:
@@ -180,7 +180,7 @@ def build_network(d):
 	GNN["instance_target"] = instance_target
 	GNN["predicted_val"] = predicted_val
 	GNN["loss"] = loss
-	GNN["accuracy"] = accuracy
+	GNN["%error"] = error
 	GNN["train_step"] = train_step
 
 	return GNN
@@ -464,7 +464,7 @@ if __name__ == '__main__':
 			# Run batches
 			#instance_generator.reset()
 			epoch_loss = 0.0
-			epoch_acc = 0
+			epoch_err = 0
 			epoch_n = 0
 			epoch_m = 0
 			#for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
@@ -496,8 +496,8 @@ if __name__ == '__main__':
 				m = Ms[2][1]
 				
 
-				_, loss, acc = sess.run(
-					[ GNN["train_step"], GNN["loss"], GNN["accuracy"] ],
+				_, loss, err = sess.run(
+					[ GNN["train_step"], GNN["loss"], GNN["%error"] ],
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["Ms"]: Ms,
 						GNN["gnn"].matrix_placeholders["Mt"]: Mt,
@@ -510,18 +510,18 @@ if __name__ == '__main__':
 				)
 				
 				epoch_loss += loss
-				epoch_acc += acc
+				epoch_err += err
 				epoch_n += n
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,\"%Error\"): ({loss:.5f},{error:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = batch_i,
 						loss = loss,
-						accuracy = acc,
+						error = err,
 						n = n,
 						m = m,
 						i = instances
@@ -531,21 +531,21 @@ if __name__ == '__main__':
 			#end for
 			# Summarize Epoch
 			epoch_loss = epoch_loss / batches_per_epoch
-			epoch_acc = epoch_acc / batches_per_epoch
+			epoch_err = epoch_err / batches_per_epoch
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,\"%Error\"): ({loss:.5f},{error:.5f})".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "all",
 					loss = epoch_loss,
-					accuracy = epoch_acc,
+					error = epoch_err,
 					n = epoch_n,
 					m = epoch_m,
 				),
 				flush = True
 			)
-			if abs(epoch_acc) < n_loss_increase_threshold and n_size < n_size_max:
+			if abs(epoch_err) < n_loss_increase_threshold and n_size < n_size_max:
 				n_size = 2 * n_size
 				n_size = n_size_max if n_size > n_size_max else n_size
 			#end if
@@ -577,8 +577,8 @@ if __name__ == '__main__':
 			test_n = Ms[2][0]
 			test_m = Ms[2][1]
 
-			test_loss, test_acc = sess.run(
-				[GNN["loss"],GNN["accuracy"]],
+			test_loss, test_err = sess.run(
+				[GNN["loss"],GNN["%error"]],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["Ms"]: Ms,
 					GNN["gnn"].matrix_placeholders["Mt"]: Mt,
@@ -590,13 +590,13 @@ if __name__ == '__main__':
 				}
 			)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,\"%Error\"): ({loss:.5f},{error:.5f})".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "tst",
 					loss = test_loss,
-					accuracy = test_acc,
+					error = test_err,
 					n = test_n,
 					m = test_m,
 					i = instances
