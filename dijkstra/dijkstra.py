@@ -233,6 +233,88 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 	return ((M1,S_mat,T_mat),f1/f1_norm), ((M2,S_mat,T_mat),f2/f2_norm), ((M3,S_mat,T_mat),f3/f3_norm)
 #end _create_graph
 
+
+def create_graph2( g_n, edge_probability, max_multiplier = 2 ):
+	Gs = None
+	while Gs is None:
+		Gs = _create_graph2( g_n, edge_probability, max_multiplier )
+	#end while
+	return Gs
+#end create_graph2
+
+def _create_graph2( g_n, edge_probability, max_multiplier = 2, factor = 2 ):
+	nb = g_n//2
+	na = g_n - nb
+	
+	Ga = nx.fast_gnp_random_graph( na, edge_probability )
+	for s, t in Ga.edges:
+		Ga[s][t]["distance"] = np.random.rand()
+	#end
+	Gb = nx.fast_gnp_random_graph( nb, edge_probability )
+	for s, t in Gb.edges:
+		Gb[s][t]["distance"] = np.random.rand()
+	#end
+	
+	Gb = nx.relabel.convert_node_labels_to_integers(Gb, first_label=na)
+	
+	sa = np.random.randint( 0, na )
+	distances = [ ( ta, nx.shortest_path_length( Ga, sa, ta, weight="distance" ) ) for ta in range(0,na) if ta != sa and nx.has_path( Ga, sa, ta ) ]
+	distances.sort( key = lambda ta_d: ta_d[1] )
+	if len( distances ) == 0:
+		return None
+	#end if
+	ta,da = distances[-1]
+	sb = np.random.randint( na, na+nb )
+	distances = [ ( tb, nx.shortest_path_length( Gb, sb, tb, weight="distance" ) ) for tb in range(na, na+nb) if tb != sb and nx.has_path( Gb, sb, tb ) ]
+	distances = [ (tb,db) for tb,db in distances if db < 2 + da/factor ]
+	if len( distances ) == 0:
+		return None
+	#end if
+	tb,db = distances[ np.random.randint( 0, len( distances ) ) ]
+	
+	G1 = nx.union( Ga, Gb )
+	G1.add_edge( sa, sb )
+	G1[sa][sb]["distance"] = np.random.rand()
+	G2 = G1.copy()
+	G2.add_edge( ta, tb )
+	G2[ta][tb]["distance"] = np.random.rand()
+	
+	d1 = nx.shortest_path_length( G1, sa, ta, weight="distance" )
+	p1 = nx.shortest_path( G1, sa, ta, weight="distance" )
+	d2 = nx.shortest_path_length( G2, sa, ta, weight="distance" )
+	p2 = nx.shortest_path( G2, sa, ta, weight="distance" )
+	if d1 < d2 or p1 == p2:
+		return None
+	#end if
+	M1_index = []
+	M1_values = []
+	M2_index = []
+	M2_values = []
+	d1_norm = 0
+	d2_norm = 0
+	for s, t in G1.edges:
+		M1_index.append( ( s, t ) )
+		M1_values.append( 1 / ( 1 + G1[s][t]["distance"] ) )
+		M1_index.append( ( t, s ) )
+		M1_values.append( 1 / ( 1 + G1[s][t]["distance"] ) )
+		d1_norm += 2 * G1[s][t]["distance"]
+	#end for
+	for s, t in G2.edges:
+		M2_index.append( ( s, t ) )
+		M2_values.append( 1 / ( 1 + G2[s][t]["distance"] ) )
+		M2_index.append( ( t, s ) )
+		M2_values.append( 1 / ( 1 + G2[s][t]["distance"] ) )
+		d2_norm += 2 * G2[s][t]["distance"]
+	#end for
+	M1 = [M1_index,M1_values,(g_n,g_n)]
+	M2 = [M2_index,M2_values,(g_n,g_n)]
+	S_mat = [[(sa,sa)],[1],(g_n,g_n)]
+	T_mat = [[(ta,ta)],[1],(g_n,g_n)]
+	d1_norm = d1_norm if d1_norm > 0 else 1
+	d2_norm = d2_norm if d2_norm > 0 else 1
+	return ((M1,S_mat,T_mat),d1/d1_norm), ((M2,S_mat,T_mat),d2/d2_norm), None
+#end _create_graph2
+
 def reindex_matrix( n, m, M ):
 	new_index = []
 	new_value = []
@@ -253,6 +335,9 @@ def create_batch(problems):
 	batch_T_index = []
 	batch_T_value = []
 	for p in problems:
+		if p is None:
+			continue
+		#end if
 		M, S, T = p
 		for i, v in reindex_matrix( n, n, M ):
 			batch_M_index.append( i )
@@ -280,9 +365,9 @@ if __name__ == '__main__':
 	epochs = 100
 	batch_n_max = 4096
 	batches_per_epoch = 32
-	n_size_min = 8
+	n_size_min = 16
 	n_loss_increase_threshold = 0.01
-	n_size_max = 64
+	n_size_max = 512
 	edge_probability = 0.25
 
 	# Build model
@@ -320,9 +405,9 @@ if __name__ == '__main__':
 						n_acc += g_n * 3
 						instances += 3
 						max_n = max( max_n, g_n )
-						(g1,f1),(g2,f2),(g3,f3) = create_graph( g_n, edge_probability )
-						Gs = Gs + [g1,g2,g3]
-						flows = flows + [f1,f2,f3]
+						(g1,f1),(g2,f2),_ = create_graph2( g_n, edge_probability )
+						Gs = Gs + [g1,g2]
+						flows = flows + [f1,f2]
 					else:
 						break
 					#end if
@@ -401,7 +486,7 @@ if __name__ == '__main__':
 					n_acc += g_n
 					instances += 1
 					max_n = max( max_n, g_n )
-					(g1,f1),_,_ = create_graph( g_n, edge_probability )
+					(g1,f1),_,_ = create_graph2( g_n, edge_probability )
 					Gs.append( g1 )
 					flows.append( f1 )
 				else:
