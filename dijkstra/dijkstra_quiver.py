@@ -113,7 +113,7 @@ def build_network(d):
 				}
 			]
 		},
-		name="Flow",
+		name="Dijkstra_Quiver",
 		
 		)
 
@@ -163,6 +163,8 @@ def build_network(d):
 	# Define loss, accuracy
 	predict_costs = tf.losses.mean_squared_error( labels = instance_val, predictions = predicted_val )
 	predict_cost = tf.reduce_mean( predict_costs )
+	# "Accuracy"
+	accuracy = tf.reduce_mean( tf.divide( tf.subtract( instance_val, predicted_val ), predicted_val ) )
 	vars_cost = tf.zeros([])
 	tvars = tf.trainable_variables()
 	for var in tvars:
@@ -178,6 +180,7 @@ def build_network(d):
 	GNN["instance_target"] = instance_target
 	GNN["predicted_val"] = predicted_val
 	GNN["loss"] = loss
+	GNN["accuracy"] = accuracy
 	GNN["train_step"] = train_step
 
 	return GNN
@@ -218,7 +221,7 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 		Mt_1_index.append( (t, e) )
 		Mw_1_index.append( (e, e) )
 		Mw_1_values.append( G1[s][t]["distance"] )
-		f1_norm += 2 * G1[s][t]["distance"]
+		f1_norm +=  G1[s][t]["distance"]
 		G2[s][t]["distance"] = G1[s][t]["distance"] * k 
 		Ms_2_index.append( (s, e) )
 		Ms_2_index.append( (t, e) )
@@ -226,7 +229,7 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 		Mt_2_index.append( (t, e) )
 		Mw_2_index.append( (e, e) )
 		Mw_2_values.append( G2[s][t]["distance"] )
-		f2_norm += 2 * G2[s][t]["distance"]
+		f2_norm +=G2[s][t]["distance"]
 	#end for
 	S = np.random.randint( 0, g_n )
 	T = S
@@ -257,7 +260,7 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 		Mt_3_index.append( (t, e) )
 		Mw_3_index.append( (e, e) )
 		Mw_3_values.append( G3[s][t]["distance"] )
-		f3_norm += 2 * G3[s][t]["distance"]
+		f3_norm += G3[s][t]["distance"]
 	#end for
 	f3 = nx.shortest_path_length( G3, S, T, "distance" )
 	g_m = len( G1.edges )
@@ -278,6 +281,100 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 	f3_norm = f3_norm if f3_norm > 0 else 1
 	return ((Ms_1,Mt_1,Mw_1,S_mat,T_mat),f1/f1_norm), ((Ms_2,Mt_2,Mw_2,S_mat,T_mat),f2/f2_norm), ((Ms_3,Mt_3,Mw_3,S_mat,T_mat),f3/f3_norm)
 #end _create_graph
+
+def create_graph2( g_n, edge_probability, max_multiplier = 2 ):
+	Gs = None
+	while Gs is None:
+		Gs = _create_graph2( g_n, edge_probability, max_multiplier )
+	#end while
+	return Gs
+#end create_graph2
+
+def _create_graph2( g_n, edge_probability, max_multiplier = 2, factor = 2 ):
+	nb = g_n//2
+	na = g_n - nb
+	
+	Ga = nx.fast_gnp_random_graph( na, edge_probability )
+	for s, t in Ga.edges:
+		Ga[s][t]["distance"] = np.random.rand()
+	#end
+	Gb = nx.fast_gnp_random_graph( nb, edge_probability )
+	for s, t in Gb.edges:
+		Gb[s][t]["distance"] = np.random.rand()
+	#end
+	
+	Gb = nx.relabel.convert_node_labels_to_integers(Gb, first_label=na)
+	
+	sa = np.random.randint( 0, na )
+	distances = [ ( ta, nx.shortest_path_length( Ga, sa, ta, weight="distance" ) ) for ta in range(0,na) if ta != sa and nx.has_path( Ga, sa, ta ) ]
+	distances.sort( key = lambda ta_d: ta_d[1] )
+	if len( distances ) == 0:
+		return None
+	#end if
+	ta,da = distances[-1]
+	sb = np.random.randint( na, na+nb )
+	distances = [ ( tb, nx.shortest_path_length( Gb, sb, tb, weight="distance" ) ) for tb in range(na, na+nb) if tb != sb and nx.has_path( Gb, sb, tb ) ]
+	distances = [ (tb,db) for tb,db in distances if db < 2 + da/factor ]
+	if len( distances ) == 0:
+		return None
+	#end if
+	tb,db = distances[ np.random.randint( 0, len( distances ) ) ]
+	
+	G1 = nx.union( Ga, Gb )
+	G1.add_edge( sa, sb )
+	G1[sa][sb]["distance"] = np.random.rand()
+	G2 = G1.copy()
+	G2.add_edge( ta, tb )
+	G2[ta][tb]["distance"] = np.random.rand()
+	
+	d1 = nx.shortest_path_length( G1, sa, ta, weight="distance" )
+	p1 = nx.shortest_path( G1, sa, ta, weight="distance" )
+	d2 = nx.shortest_path_length( G2, sa, ta, weight="distance" )
+	p2 = nx.shortest_path( G2, sa, ta, weight="distance" )
+	if d1 < d2 or p1 == p2:
+		return None
+	#end if
+	Ms_1_index = []
+	Mt_1_index = []
+	Mw_1_index = []
+	Mw_1_values = []
+	Ms_2_index = []
+	Mt_2_index = []
+	Mw_2_index = []
+	Mw_2_values = []
+	d1_norm = 0
+	d2_norm = 0
+	for e, (s, t) in enumerate( G1.edges ):
+		Ms_1_index.append( (t, e) )
+		Mt_1_index.append( (s, e) )
+		Mt_1_index.append( (t, e) )
+		Mw_1_index.append( (e, e) )
+		Mw_1_values.append( G1[s][t]["distance"] )
+		d1_norm += G1[s][t]["distance"]
+	#end for
+	for e, (s, t) in enumerate( G2.edges ):
+		Ms_2_index.append( (t, e) )
+		Mt_2_index.append( (s, e) )
+		Mt_2_index.append( (t, e) )
+		Mw_2_index.append( (e, e) )
+		Mw_2_values.append( G2[s][t]["distance"] )
+		d2_norm += G2[s][t]["distance"]
+	#end for
+	g1_m = len( G1.edges )
+	g2_m = len( G2.edges )
+	l1= lambda l: [1 for _ in l]
+	Ms_1 = [Ms_1_index,l1(Ms_1_index),(g_n,g1_m)]
+	Mt_1 = [Mt_1_index,l1(Mt_1_index),(g_n,g1_m)]
+	Mw_1 = [Mw_1_index,Mw_1_values,(g1_m,g1_m)]
+	Ms_2 = [Ms_2_index,l1(Ms_2_index),(g_n,g2_m)]
+	Mt_2 = [Mt_2_index,l1(Mt_2_index),(g_n,g2_m)]
+	Mw_2 = [Mw_2_index,Mw_2_values,(g2_m,g2_m)]
+	S_mat = [[(sa,sa)],[1],(g_n,g_n)]
+	T_mat = [[(ta,ta)],[1],(g_n,g_n)]
+	d1_norm = d1_norm if d1_norm > 0 else 1
+	d2_norm = d1_norm if d2_norm > 0 else 1
+	return ((Ms_1,Mt_1,Mw_1,S_mat,T_mat),d1/d1_norm), ((Ms_2,Mt_2,Mw_2,S_mat,T_mat), d2/d2_norm), None
+#end _create_graph2
 
 def reindex_matrix( n, m, M ):
 	new_index = []
@@ -303,6 +400,9 @@ def create_batch(problems):
 	batch_T_index = []
 	batch_T_value = []
 	for p in problems:
+		if p is None:
+			continue
+		#end if
 		Ms, Mt, Mw, S, T = p
 		for i, v in reindex_matrix( n, m, Ms ):
 			batch_Ms_index.append( i )
@@ -338,11 +438,11 @@ def create_batch(problems):
 if __name__ == '__main__':
 	d = 64
 	epochs = 100
-	batch_n_max = 4096
+	batch_n_max = 2048
 	batches_per_epoch = 32
-	n_size_min = 8
+	n_size_min = 16
 	n_loss_increase_threshold = 0.01
-	n_size_max = 64
+	n_size_max = 128
 	edge_probability = 0.25
 
 	# Build model
@@ -364,7 +464,7 @@ if __name__ == '__main__':
 			# Run batches
 			#instance_generator.reset()
 			epoch_loss = 0.0
-			epoch_allowed_flow_error = 0
+			epoch_acc = 0
 			epoch_n = 0
 			epoch_m = 0
 			#for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
@@ -374,16 +474,16 @@ if __name__ == '__main__':
 				max_n = 0
 				instances = 0
 				Gs = []
-				flows = []
+				distances = []
 				while True:
 					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
 					if n_acc + g_n * 3 < batch_n_max:
 						n_acc += g_n * 3
 						instances += 3
 						max_n = max( max_n, g_n )
-						(g1,f1),(g2,f2),(g3,f3) = create_graph( g_n, edge_probability )
-						Gs = Gs + [g1,g2,g3]
-						flows = flows + [f1,f2,f3]
+						(g1,f1),(g2,f2),_ = create_graph2( g_n, edge_probability )
+						Gs = Gs + [g1,g2]
+						distances = distances + [f1,f2]
 					else:
 						break
 					#end if
@@ -391,38 +491,37 @@ if __name__ == '__main__':
 				Ms, Mt, Mw, S, T = create_batch( Gs )
 				targets = [ t for (t,_) in T[0] ]
 				time_steps = max_n
-				batch_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+				batch_allowed_error = sum( distances ) * n_loss_increase_threshold
 				n = Ms[2][0]
 				m = Ms[2][1]
 				
 
-				_, loss = sess.run(
-					[ GNN["train_step"], GNN["loss"] ],
+				_, loss, acc = sess.run(
+					[ GNN["train_step"], GNN["loss"], GNN["accuracy"] ],
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["Ms"]: Ms,
 						GNN["gnn"].matrix_placeholders["Mt"]: Mt,
 						GNN["gnn"].matrix_placeholders["Mw"]: Mw,
 						GNN["gnn"].matrix_placeholders["S"]: S,
 						GNN["gnn"].time_steps: time_steps,
-						GNN["instance_val"]: flows,
+						GNN["instance_val"]: distances,
 						GNN["instance_target"]: targets
 					}
 				)
 				
 				epoch_loss += loss
-				epoch_allowed_flow_error += batch_allowed_flow_error
+				epoch_acc += acc
 				epoch_n += n
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = batch_i,
 						loss = loss,
-						allowed = batch_allowed_flow_error,
-						good = loss / batch_allowed_flow_error,
+						accuracy = acc,
 						n = n,
 						m = m,
 						i = instances
@@ -432,22 +531,21 @@ if __name__ == '__main__':
 			#end for
 			# Summarize Epoch
 			epoch_loss = epoch_loss / batches_per_epoch
-			epoch_allowed_flow_error = epoch_allowed_flow_error / batches_per_epoch
+			epoch_acc = epoch_acc / batches_per_epoch
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "all",
 					loss = epoch_loss,
-					allowed = epoch_allowed_flow_error,
-					good = epoch_loss / epoch_allowed_flow_error,
+					accuracy = epoch_acc,
 					n = epoch_n,
 					m = epoch_m,
 				),
 				flush = True
 			)
-			if epoch_loss < epoch_allowed_flow_error and n_size < n_size_max:
+			if abs(epoch_acc) < n_loss_increase_threshold and n_size < n_size_max:
 				n_size = 2 * n_size
 				n_size = n_size_max if n_size > n_size_max else n_size
 			#end if
@@ -458,16 +556,16 @@ if __name__ == '__main__':
 			max_n = 0
 			instances = 0
 			Gs = []
-			flows = []
+			distances = []
 			while True:
 				g_n = np.random.randint( n_size, n_size*2 )
 				if n_acc + g_n < batch_n_max:
 					n_acc += g_n
 					instances += 1
 					max_n = max( max_n, g_n )
-					(g1,f1),_,_ = create_graph( g_n, edge_probability )
+					(g1,f1),_,_ = create_graph2( g_n, edge_probability )
 					Gs.append( g1 )
-					flows.append( f1 )
+					distances.append( f1 )
 				else:
 					break
 				#end if
@@ -475,31 +573,30 @@ if __name__ == '__main__':
 			Ms, Mt, Mw, S, T = create_batch( Gs )
 			targets = [ t for (t,_) in T[0] ]
 			time_steps = max_n
-			test_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+			test_allowed_error = sum( distances ) * n_loss_increase_threshold
 			test_n = Ms[2][0]
 			test_m = Ms[2][1]
 
-			test_loss = sess.run(
-				GNN["loss"],
+			test_loss, test_acc = sess.run(
+				[GNN["loss"],GNN["accuracy"]],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["Ms"]: Ms,
 					GNN["gnn"].matrix_placeholders["Mt"]: Mt,
 					GNN["gnn"].matrix_placeholders["Mw"]: Mw,
 					GNN["gnn"].matrix_placeholders["S"]: S,
 					GNN["gnn"].time_steps: time_steps,
-					GNN["instance_val"]: flows,
+					GNN["instance_val"]: distances,
 					GNN["instance_target"]: targets
 				}
 			)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "tst",
 					loss = test_loss,
-					allowed = test_allowed_flow_error,
-					good = test_loss / test_allowed_flow_error,
+					accuracy = test_acc,
 					n = test_n,
 					m = test_m,
 					i = instances

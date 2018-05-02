@@ -89,7 +89,7 @@ def build_network(d):
 				}
 			]
 		},
-		name="Flow",
+		name="Dijkstra",
 	)
 
 	# Define L_vote
@@ -138,6 +138,8 @@ def build_network(d):
 	# Define loss, accuracy
 	predict_costs = tf.losses.mean_squared_error( labels = instance_val, predictions = predicted_val )
 	predict_cost = tf.reduce_mean( predict_costs )
+	# "Accuracy"
+	accuracy = tf.reduce_mean( tf.divide( tf.subtract( instance_val, predicted_val ), predicted_val ) )
 	vars_cost = tf.zeros([])
 	tvars = tf.trainable_variables()
 	for var in tvars:
@@ -153,6 +155,7 @@ def build_network(d):
 	GNN["instance_target"] = instance_target
 	GNN["predicted_val"] = predicted_val
 	GNN["loss"] = loss
+	GNN["accuracy"] = accuracy
 	GNN["train_step"] = train_step
 	return GNN
 #end build_network
@@ -388,7 +391,7 @@ if __name__ == '__main__':
 			# Run batches
 			#instance_generator.reset()
 			epoch_loss = 0.0
-			epoch_allowed_flow_error = 0
+			epoch_acc = 0
 			epoch_n = 0
 			epoch_m = 0
 			for batch_i in range( batches_per_epoch ):
@@ -398,7 +401,7 @@ if __name__ == '__main__':
 				max_n = 0
 				instances = 0
 				Gs = []
-				flows = []
+				distances = []
 				while True:
 					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
 					if n_acc + g_n * 3 < batch_n_max:
@@ -407,7 +410,7 @@ if __name__ == '__main__':
 						max_n = max( max_n, g_n )
 						(g1,f1),(g2,f2),_ = create_graph2( g_n, edge_probability )
 						Gs = Gs + [g1,g2]
-						flows = flows + [f1,f2]
+						distances = distances + [f1,f2]
 					else:
 						break
 					#end if
@@ -415,35 +418,34 @@ if __name__ == '__main__':
 				M, S, T = create_batch( Gs )
 				targets = [ t for (t,_) in T[0] ]
 				time_steps = max_n
-				batch_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+				batch_allowed_error = sum( distances ) * n_loss_increase_threshold
 				n = M[2][0]
 				m = len( M[0] )
 
-				_, loss = sess.run(
-					[ GNN["train_step"], GNN["loss"] ],
+				_, loss, acc = sess.run(
+					[ GNN["train_step"], GNN["loss"], GNN["accuracy"] ],
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["M"]: M,
 						GNN["gnn"].matrix_placeholders["S"]: S,
 						GNN["gnn"].time_steps: time_steps,
-						GNN["instance_val"]: flows,
+						GNN["instance_val"]: distances,
 						GNN["instance_target"]: targets
 					}
 				)
 				
 				epoch_loss += loss
-				epoch_allowed_flow_error += batch_allowed_flow_error
+				epoch_acc += acc
 				epoch_n += n
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = batch_i,
 						loss = loss,
-						allowed = batch_allowed_flow_error,
-						good = loss / batch_allowed_flow_error,
+						accuracy = acc,
 						n = n,
 						m = m,
 						i = instances
@@ -453,22 +455,21 @@ if __name__ == '__main__':
 			#end for
 			# Summarize Epoch
 			epoch_loss = epoch_loss / batches_per_epoch
-			epoch_allowed_flow_error = epoch_allowed_flow_error / batches_per_epoch
+			epoch_acc = epoch_acc / batches_per_epoch
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "all",
 					loss = epoch_loss,
-					allowed = epoch_allowed_flow_error,
-					good = epoch_loss / epoch_allowed_flow_error,
+					accuracy = epoch_acc,
 					n = epoch_n,
 					m = epoch_m,
 				),
 				flush = True
 			)
-			if epoch_loss < epoch_allowed_flow_error and n_size < n_size_max:
+			if abs(epoch_acc) < n_loss_increase_threshold and n_size < n_size_max:
 				n_size = 2 * n_size
 				n_size = n_size_max if n_size > n_size_max else n_size
 			#end if
@@ -479,7 +480,7 @@ if __name__ == '__main__':
 			max_n = 0
 			instances = 0
 			Gs = []
-			flows = []
+			distances = []
 			while True:
 				g_n = np.random.randint( n_size, n_size*2 )
 				if n_acc + g_n < batch_n_max:
@@ -488,7 +489,7 @@ if __name__ == '__main__':
 					max_n = max( max_n, g_n )
 					(g1,f1),_,_ = create_graph2( g_n, edge_probability )
 					Gs.append( g1 )
-					flows.append( f1 )
+					distances.append( f1 )
 				else:
 					break
 				#end if
@@ -496,29 +497,28 @@ if __name__ == '__main__':
 			M, S, T = create_batch( Gs )
 			targets = [ t for (t,_) in T[0] ]
 			time_steps = max_n
-			test_allowed_flow_error = sum( flows ) * n_loss_increase_threshold
+			test_allowed_error = sum( distances ) * n_loss_increase_threshold
 			test_n = M[2][0]
 			test_m = len( M[0] )
 			
-			test_loss = sess.run(
-				GNN["loss"],
+			test_loss, test_acc = sess.run(
+				[GNN["loss"],GNN["accuracy"]],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].matrix_placeholders["S"]: S,
 					GNN["gnn"].time_steps: time_steps,
-					GNN["instance_val"]: flows,
+					GNN["instance_val"]: distances,
 					GNN["instance_target"]: targets
 				}
 			)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,Allowed,Loss/Allowed): ({loss:.5f},{allowed:.5f},{good:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,\"%Accuracy\"): ({loss:.5f},{accuracy:.5f})".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "tst",
 					loss = test_loss,
-					allowed = test_allowed_flow_error,
-					good = test_loss / test_allowed_flow_error,
+					accuracy = test_acc,
 					n = test_n,
 					m = test_m,
 					i = instances
