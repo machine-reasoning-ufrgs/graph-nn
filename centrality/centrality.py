@@ -37,7 +37,7 @@ def dense_to_sparse( M ):
 #end dense_to_sparse
 
 def percent_error(labels,predictions):
-	return tf.reduce_mean( tf.divide( tf.abs( tf.subtract( labels, predictions ) ), tf.add( labels, tf.constant(1) ) ) )
+	return tf.reduce_mean( tf.divide( tf.abs( tf.subtract( labels, predictions ) ), tf.add( labels, tf.constant(1.0) ) ) )
 #end percent_error
 
 def build_network(d):
