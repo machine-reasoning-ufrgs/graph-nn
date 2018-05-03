@@ -36,6 +36,10 @@ def dense_to_sparse( M ):
 	return (M_i,M_v,M_shape)
 #end dense_to_sparse
 
+def percent_error(labels,predictions):
+	return tf.reduce_mean( tf.divide( tf.abs( tf.subtract( labels, predictions ) ), labels ) )
+#end percent_error
+
 def build_network(d):
 
 	# Hyperparameters
@@ -180,6 +184,12 @@ def build_network(d):
 	grads, _ = tf.clip_by_global_norm( tf.gradients( loss, tvars ), global_norm_gradient_clipping_ratio )
 	train_step = optimizer.apply_gradients( zip( grads, tvars ) )
 	
+	
+	betweenness_predict_error = percent_error( labels = instance_betweenness, predictions = predicted_betweenness )
+	closeness_predict_error = percent_error( labels = instance_closeness, predictions = predicted_closeness )
+	eigenvector_predict_error = percent_error( labels = instance_eigenvector, predictions = predicted_eigenvector )
+	error = tf.reduce_mean( [ betweenness_predict_error, closeness_predict_error, eigenvector_predict_error ] )
+	
 	GNN["gnn"] = gnn
 	GNN["instance_betweenness"] = instance_betweenness
 	GNN["instance_closeness"] = instance_closeness
@@ -191,6 +201,10 @@ def build_network(d):
 	GNN["betweenness_predict_cost"] = betweenness_predict_cost
 	GNN["closeness_predict_cost"] = closeness_predict_cost
 	GNN["eigenvector_predict_cost"] = eigenvector_predict_cost
+	GNN["error"] = error
+	GNN["betweenness_predict_error"] = betweenness_predict_error
+	GNN["closeness_predict_error"] = closeness_predict_error
+	GNN["eigenvector_predict_error"] = eigenvector_predict_error
 	GNN["loss"] = loss
 	GNN["train_step"] = train_step
 	return GNN
@@ -317,6 +331,10 @@ if __name__ == '__main__':
 			epoch_betc = 0
 			epoch_cloc = 0
 			epoch_eigc = 0
+			epoch_err = 0.0
+			epoch_bete = 0
+			epoch_cloe = 0
+			epoch_eige = 0
 			epoch_n = 0
 			epoch_m = 0
 			for batch_i in range( batches_per_epoch ):
@@ -350,8 +368,8 @@ if __name__ == '__main__':
 				m = len( M[0] )
 				print( targets )
 
-				_, loss, betc, cloc, eigc = sess.run(
-					[ GNN["train_step"], GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"] ],
+				_, loss, betc, cloc, eigc, err, bete, cloe, eige = sess.run(
+					[ GNN["train_step"], GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["M"]: M,
 						GNN["gnn"].time_steps: time_steps,
@@ -361,16 +379,21 @@ if __name__ == '__main__':
 						GNN["instance_target"]: targets
 					}
 				)
+				print( err, bete, cloe, eige )
 				
 				epoch_loss += loss
 				epoch_betc += betc
 				epoch_cloc += cloc
 				epoch_eigc += eigc
+				epoch_err += err
+				epoch_betc += bete
+				epoch_cloc += cloe
+				epoch_eigc += eige
 				epoch_n += n
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Betweenness,Closeness,Eigenvector): ({loss:.5f},{betweenness_cost:.5f},{closeness_cost:.5f},{eigenvector_cost:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
@@ -379,6 +402,10 @@ if __name__ == '__main__':
 						betweenness_cost = betc,
 						closeness_cost = cloc,
 						eigenvector_cost = eigc,
+						error = err,
+						betweenness_error = bete,
+						closeness_error = cloe,
+						eigenvector_error = eige,
 						n = n,
 						m = m,
 						i = instances
@@ -391,8 +418,12 @@ if __name__ == '__main__':
 			epoch_betc = epoch_betc / batches_per_epoch
 			epoch_cloc = epoch_cloc / batches_per_epoch
 			epoch_eigc = epoch_eigc / batches_per_epoch
+			epoch_err = epoch_err / batches_per_epoch
+			epoch_bete = epoch_bete / batches_per_epoch
+			epoch_cloe = epoch_cloe / batches_per_epoch
+			epoch_eige = epoch_eige / batches_per_epoch
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,Betweenness,Closeness,Eigenvector): ({loss:.5f},{betweenness_cost:.5f},{closeness_cost:.5f},{eigenvector_cost:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
@@ -401,6 +432,10 @@ if __name__ == '__main__':
 					betweenness_cost = epoch_betc,
 					closeness_cost = epoch_cloc,
 					eigenvector_cost = epoch_eigc,
+					error = epoch_err,
+					betweenness_error = epoch_bete,
+					closeness_error = epoch_cloe,
+					eigenvector_error = epoch_eige,
 					n = epoch_n,
 					m = epoch_m,
 				),
@@ -435,8 +470,8 @@ if __name__ == '__main__':
 			test_n = M[2][0]
 			test_m = len( M[0] )
 			
-			test_loss, test_betc, test_cloc, test_eigc = sess.run(
-				[ GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"] ],
+			test_loss, test_betc, test_cloc, test_eigc, test_err, test_bete, test_cloe, test_eige = sess.run(
+					[ GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].time_steps: time_steps,
@@ -447,7 +482,7 @@ if __name__ == '__main__':
 				}
 			)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,Betweenness,Closeness,Eigenvector): ({loss:.5f},{betweenness_cost:.5f},{closeness_cost:.5f},{eigenvector_cost:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
@@ -456,6 +491,10 @@ if __name__ == '__main__':
 					betweenness_cost = test_betc,
 					closeness_cost = test_cloc,
 					eigenvector_cost = test_eigc,
+					error = test_err,
+					betweenness_error = test_bete,
+					closeness_error = test_cloe,
+					eigenvector_error = test_eige,
 					n = test_n,
 					m = test_m,
 					i = instances
