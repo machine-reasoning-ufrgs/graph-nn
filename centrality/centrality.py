@@ -392,9 +392,9 @@ if __name__ == '__main__':
 				epoch_cloc += cloc
 				epoch_eigc += eigc
 				epoch_err += err
-				epoch_betc += bete
-				epoch_cloc += cloe
-				epoch_eigc += eige
+				epoch_bete += bete
+				epoch_cloe += cloe
+				epoch_eige += eige
 				epoch_n += n
 				epoch_m += m
 				
