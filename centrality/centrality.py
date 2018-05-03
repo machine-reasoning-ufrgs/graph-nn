@@ -366,7 +366,6 @@ if __name__ == '__main__':
 				M, targets = create_batch( batch )
 				n = M[2][0]
 				m = len( M[0] )
-				print( targets )
 
 				_, loss, betc, cloc, eigc, err, bete, cloe, eige = sess.run(
 					[ GNN["train_step"], GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
@@ -379,7 +378,6 @@ if __name__ == '__main__':
 						GNN["instance_target"]: targets
 					}
 				)
-				print( err, bete, cloe, eige )
 				
 				epoch_loss += loss
 				epoch_betc += betc
