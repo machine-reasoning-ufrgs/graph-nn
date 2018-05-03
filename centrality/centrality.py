@@ -222,13 +222,28 @@ def build_network(d):
 	return GNN
 #end build_network
 
-def create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k = 4, smallworld_p = 0.25, powerlaw_cluster_m = 3, powerlaw_cluster_p = 0.1  ):
+def create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k = 4, smallworld_p = 0.25, powerlaw_cluster_m = 3, powerlaw_cluster_p = 0.1 ):
 	Gs = None
 	while Gs is None:
 		Gs = _create_graph( g_n, erdos_renyi_p, powerlaw_gamma, smallworld_k, smallworld_p, powerlaw_cluster_m, powerlaw_cluster_p )
 	#end while
 	return Gs
 #end create_graph
+
+def build_M_from_graph( G, undirected = True, key = None ):
+	getval = lambda a: 1 if key is None else a[key]
+	M_index = []
+	M_values = []
+	for s, t in G.edges:
+		M_index.append( ( s, t ) )
+		M_values.append( getval( G[s][t] ) )
+		if undirected:
+			M_index.append( ( t, s ) )
+			M_values.append( getval( G[s][t] ) )
+		#end if
+	#end for
+	return M_index, M_values
+#end build_M_from_graph
 
 def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k = 4, smallworld_p = 0.25, powerlaw_cluster_m = 3, powerlaw_cluster_p = 0.1 ):
 	# Create a graph from a random distribution
@@ -258,14 +273,8 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 		#end try
 	#end if
 	# TODO: Add weights to the edges and fill the sparse matrices
-	M_index = []
-	M_values = []
 	for s, t in G.edges:
 		G[s][t]["weight"] = np.random.rand()
-		M_index.append( ( s, t ) )
-		M_values.append( 1 )
-		M_index.append( ( t, s ) )
-		M_values.append( 1 )
 	#end for
 	T = np.random.randint( 0, g_n )
 	betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G )[T] )
@@ -276,6 +285,7 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 		print( e, file = sys.stderr, flush = True )
 		return None
 	#end try
+	M_index, M_values = build_M_from_graph( G )
 	M = [M_index,M_values,(g_n,g_n)]
 	return M,T,betweenness,closeness,eigenvector
 #end _create_graph
@@ -496,7 +506,7 @@ if __name__ == '__main__':
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
-					batch = "tst",
+					batch = "rnd",
 					loss = test_loss,
 					betweenness_cost = test_betc,
 					closeness_cost = test_cloc,
@@ -511,5 +521,88 @@ if __name__ == '__main__':
 				),
 				flush = True
 			)
-			
+			# Test with real graphs
+			test_loss = 0.0
+			test_betc = 0.0
+			test_cloc = 0.0
+			test_eigc = 0.0
+			test_err = 0.0
+			test_bete = 0.0
+			test_cloe = 0.0
+			test_eige = 0.0
+			instances = 0
+			test_n = 0
+			test_m = 0
+			for f in os.listdir("./centrality/test"):
+				if f.endswith(".g"):
+					G = nx.read_edgelist( os.path.join("./centrality/test", f) )
+					G = nx.convert_node_labels_to_integers(G)
+					g_n = len( G.nodes )
+					T = np.random.randint( 0, g_n )
+					betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G )[T] )
+					closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
+					try:
+						eigenvector = crop_to_float32_mantissa_limit( nx.eigenvector_centrality( G )[T] )
+					except nx.exception.PowerIterationFailedConvergence as e:
+						print( e, file = sys.stderr, flush = True )
+						continue
+					#end try
+					M_i, M_v = build_M_from_graph( G )
+					M = [M_i,M_v,(g_n,g_n)]
+					loss, betc, cloc, eigc, err, bete, cloe, eige = sess.run(
+						[ GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
+						feed_dict = {
+							GNN["gnn"].matrix_placeholders["M"]: M,
+							GNN["gnn"].time_steps: time_steps,
+							GNN["instance_betweenness"]: [ betweenness ],
+							GNN["instance_closeness"]: [ closeness ],
+							GNN["instance_eigenvector"]: [ eigenvector ],
+							GNN["instance_target"]: [ T ]
+						}
+					)
+					print( f, loss, betc, cloc, eigc, err, bete, cloe, eige, file=sys.stderr )
+					test_n += M[2][0]
+					test_m += len( M[0] )
+					test_loss += loss
+					test_betc += betc
+					test_cloc += cloc
+					test_eigc += eigc
+					test_err += err
+					test_bete += bete
+					test_cloe += cloe
+					test_eige += eige
+					instances += 1
+				#end if
+			#end for
+			if instances > 0:
+				test_loss /= instances
+				test_betc /= instances
+				test_cloc /= instances
+				test_eigc /= instances
+				test_err /= instances
+				test_bete /= instances
+				test_cloe /= instances
+				test_eige /= instances
+				print(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
+						timestamp = timestamp(),
+						memory = memory_usage(),
+						epoch = epoch,
+						batch = "tst",
+						loss = test_loss,
+						betweenness_cost = test_betc,
+						closeness_cost = test_cloc,
+						eigenvector_cost = test_eigc,
+						error = test_err,
+						betweenness_error = test_bete,
+						closeness_error = test_cloe,
+						eigenvector_error = test_eige,
+						n = test_n,
+						m = test_m,
+						i = instances
+					),
+					flush = True
+				)
+			#end if
+		#end for(epochs)
 	#end Session
