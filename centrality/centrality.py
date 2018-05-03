@@ -11,6 +11,10 @@ from mlp import Mlp
 #import itertools
 
 FLOAT32_MANTISSA_LIMIT = 0.00000001
+# Alternative:
+#FLOAT32_MANTISSA_LENGTH = 20 # Actually 24, but set to 20 to allow ignore some small numbers.
+#FLOAT32_MANTISSA_LIMIT = 1
+#for _ in range( MANTISSA_SIZE ): FLOAT32_MANTISSA_LIMIT /= 2;
 def crop_to_float32_mantissa_limit(n):
 	return n if abs(n) > FLOAT32_MANTISSA_LIMIT else 0
 #end crop_to_float32_mantissa_limit
