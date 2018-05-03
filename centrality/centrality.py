@@ -10,6 +10,11 @@ from mlp import Mlp
 # Import tools
 #import itertools
 
+FLOAT32_MANTISSA_LIMIT = 0.00000001
+def crop_to_float32_mantissa_limit(n):
+	return n if abs(n) > FLOAT32_MANTISSA_LIMIT else 0
+#end crop_to_float32_mantissa_limit
+
 def timestamp():
 	return time.strftime( "%Y%m%d%H%M%S", time.gmtime() )
 #end timestamp
@@ -259,10 +264,10 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 		M_values.append( 1 )
 	#end for
 	T = np.random.randint( 0, g_n )
-	betweenness = nx.betweenness_centrality( G )[T]
-	closeness = nx.closeness_centrality( G, T )
+	betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G )[T] )
+	closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
 	try:
-		eigenvector = nx.eigenvector_centrality( G )[T]
+		eigenvector = crop_to_float32_mantissa_limit( nx.eigenvector_centrality( G )[T] )
 	except nx.exception.PowerIterationFailedConvergence as e:
 		print( e, file = sys.stderr, flush = True )
 		return None
