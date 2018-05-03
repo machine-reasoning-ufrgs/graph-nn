@@ -36,8 +36,11 @@ def dense_to_sparse( M ):
 	return (M_i,M_v,M_shape)
 #end dense_to_sparse
 
-def percent_error(labels,predictions):
-	return tf.reduce_mean( tf.divide( tf.abs( tf.subtract( labels, predictions ) ), tf.add( labels, tf.constant(1.0) ) ) )
+def percent_error(labels,predictions,dtype=tf.float32):
+	# Replace any zeroes with ones
+	labels_div = tf.where( tf.equal( labels, 0 ), tf.ones_like( labels, dtype=dtype ), labels )
+	# Get % error
+	return tf.reduce_mean( tf.divide( tf.abs( tf.subtract( labels, predictions ) ), labels_div ) )
 #end percent_error
 
 def build_network(d):
