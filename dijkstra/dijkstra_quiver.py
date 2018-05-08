@@ -9,32 +9,7 @@ from graphnn import GraphNN
 from mlp import Mlp
 # Import tools
 #import itertools
-
-def timestamp():
-	return time.strftime( "%Y%m%d%H%M%S", time.gmtime() )
-#end timestamp
-
-def memory_usage():
-	pid=os.getpid()
-	s = next( line for line in open( '/proc/{}/status'.format( pid ) ).read().splitlines() if line.startswith( 'VmSize' ) ).split()
-	return "{} {}".format( s[-2], s[-1] )
-#end memory_usage
-
-def dense_to_sparse( M ):
-	n, m = M.shape
-	M_i = []
-	M_v = []
-	M_shape = (n,m)
-	for i in range( n ):
-		for j in range( m ):
-			if M[i,j] > 0.5:
-				M_i.append( (i,j ) )
-				M_v.append( 1 )
-			#end if
-		#end for
-	#end for
-	return (M_i,M_v,M_shape)
-#end dense_to_sparse
+from util import timestamp, memory_usage
 
 def build_network(d):
 

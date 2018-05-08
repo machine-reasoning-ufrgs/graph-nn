@@ -11,16 +11,7 @@ from mlp import Mlp
 from instance_loader import InstanceLoader
 # Import tools
 import itertools
-
-def timestamp():
-	return time.strftime( "%Y%m%d%H%M%S", time.gmtime() )
-#end timestamp
-
-def memory_usage():
-	pid=os.getpid()
-	s = next( line for line in open( '/proc/{}/status'.format( pid ) ).read().splitlines() if line.startswith( 'VmSize' ) ).split()
-	return "{} {}".format( s[-2], s[-1] )
-#end memory_usage
+from util import timestamp, memory_usage, dense_to_sparse
 
 def build_network(d):
 
@@ -156,22 +147,6 @@ def build_network(d):
 	GNN["train_step"] 				= train_step
 	return GNN
 #end build_networks
-
-def dense_to_sparse( M ):
-	n, m = M.shape
-	M_i = []
-	M_v = []
-	M_shape = (n,m)
-	for i in range( n ):
-		for j in range( m ):
-			if M[i,j] == 1:
-				M_i.append( (i,j ) )
-				M_v.append( 1 )
-			#end if
-		#end for
-	#end for
-	return (M_i,M_v,M_shape)
-#end dense_to_sparse
 
 if __name__ == '__main__':
 	d 					= 128

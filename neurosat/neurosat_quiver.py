@@ -6,22 +6,12 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 # Import model builder
 from graphnn import GraphNN
 from cnf import CNF
+from mlp import Mlp
 # Import tools
 import instance_loader
 import itertools
 from cnf import create_batchCNF
-from mlp import Mlp
-
-def timestamp():
-
-	return time.strftime( "%Y%m%d%H%M%S", time.gmtime() )
-#end timestamp
-
-def memory_usage():
-	pid=os.getpid()
-	s = next( line for line in open( '/proc/{}/status'.format( pid ) ).read().splitlines() if line.startswith( 'VmSize' ) ).split()
-	return "{} {}".format( s[-2], s[-1] )
-#end memory_usage
+from util import timestamp, memory_usage
 
 def build_neurosat_quiver(d):
 
