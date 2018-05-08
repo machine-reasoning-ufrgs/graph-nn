@@ -88,21 +88,26 @@ def build_network(d):
 			"M": ("N","N")
 		},
 		{
-			"Nmsg": ("N","N")
+			"Nsource": ("N","N"),
+			"Ntarget": ("N","N")
 		},
 		{
 			"N": [
 				{
 					"mat": "M",
-					"var": "N"
+					"var": "N",
+					"msg": "Nsource"
 				},
 				{
 					"mat": "M",
 					"transpose?": True,
-					"var": "N"
+					"var": "N",
+					"msg": "Ntarget"
 				}
 			]
 		},
+		Cell_activation = tf.nn.sigmoid,
+		Msg_last_activation = tf.nn.sigmoid,
 		name="Centrality",
 	)
 
@@ -111,6 +116,7 @@ def build_network(d):
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
 		output_size = 1,
+		output_activation = tf.nn.sigmoid,
 		name = "betweenness_MLP",
 		name_internal_layers = True,
 		kernel_initializer = tf.contrib.layers.xavier_initializer(),
@@ -120,6 +126,7 @@ def build_network(d):
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
 		output_size = 1,
+		output_activation = tf.nn.sigmoid,
 		name = "closeness_MLP",
 		name_internal_layers = True,
 		kernel_initializer = tf.contrib.layers.xavier_initializer(),
@@ -129,6 +136,7 @@ def build_network(d):
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
 		output_size = 1,
+		output_activation = tf.nn.sigmoid,
 		name = "eigenvector_MLP",
 		name_internal_layers = True,
 		kernel_initializer = tf.contrib.layers.xavier_initializer(),

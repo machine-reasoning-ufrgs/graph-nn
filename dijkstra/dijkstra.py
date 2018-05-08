@@ -237,7 +237,6 @@ def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
 	return ((M1,S_mat,T_mat),f1/f1_norm), ((M2,S_mat,T_mat),f2/f2_norm), ((M3,S_mat,T_mat),f3/f3_norm)
 #end _create_graph
 
-
 def create_graph2( g_n, edge_probability, max_multiplier = 2 ):
 	Gs = None
 	while Gs is None:

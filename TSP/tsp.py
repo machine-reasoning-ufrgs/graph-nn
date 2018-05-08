@@ -313,6 +313,7 @@ def build_network(d):
 
 	# Define accuracy
 	acc = tf.reduce_mean(tf.div(tf.subtract(predictions, labels), labels))
+	modacc = tf.reduce_mean(tf.div(tf.abs(tf.subtract(predictions, labels)), labels))
 
 	GNN["gnn"] 						= gnn
 	GNN["n_vertices"]				= n_vertices
@@ -322,6 +323,7 @@ def build_network(d):
 	GNN["avg_pred"]					= tf.reduce_mean(predictions)
 	GNN["loss"] 					= loss
 	GNN["acc"]						= acc
+	GNN["modacc"] = modacc
 	GNN["train_step"] 				= train_step
 	return GNN
 #end
@@ -357,7 +359,7 @@ def save_weights(sess,path,scope=None):
 
 if __name__ == '__main__':
 	
-	create_datasets 	= True
+	create_datasets 	= False
 	load_checkpoints	= False
 	save_checkpoints	= True
 
@@ -401,7 +403,7 @@ if __name__ == '__main__':
 
 				# Reset train loader
 				train_loader.reset()
-				e_loss_train, e_acc_train, e_pred_train = 0, 0, 0
+				e_loss_train, e_acc_train, e_modacc_train, e_pred_train = 0, 0, 0, 0
 				for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), batches_per_epoch):
 
 					# Get features, problem sizes, labels
@@ -421,8 +423,8 @@ if __name__ == '__main__':
 					#end
 
 					# Run one SGD iteration
-					_, loss, acc, pred = sess.run(
-						[ GNN["train_step"], GNN["loss"], GNN["acc"], GNN["avg_pred"] ],
+					_, loss, acc, modacc, pred = sess.run(
+						[ GNN["train_step"], GNN["loss"], GNN["acc"], GNN["modacc"], GNN["avg_pred"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["Msrc"]:	dense_to_sparse(Msrc),
 							GNN["gnn"].matrix_placeholders["Mtgt"]:	dense_to_sparse(Mtgt),
@@ -436,17 +438,19 @@ if __name__ == '__main__':
 
 					e_loss_train += loss
 					e_acc_train += acc
+					e_modacc_train += modacc
 					e_pred_train += pred
 
 					# Print batch summary
 					print(
-						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Acc,Avg.Pred): ({loss:.5f},{acc:.5f},{pred:.3f})".format(
+						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Acc|Acc|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
 							timestamp = timestamp(),
 							memory = memory_usage(),
 							epoch = epoch,
 							batch = batch_i,
 							loss = loss,
 							acc = acc,
+							modacc = modacc,
 							pred = pred,
 							n = total_vertices,
 							m = total_edges,
@@ -457,16 +461,18 @@ if __name__ == '__main__':
 				#end
 				e_loss_train /= batches_per_epoch
 				e_acc_train /= batches_per_epoch
+				e_modacc_train /= batches_per_epoch
 				e_pred_train /= batches_per_epoch
 				# Print train epoch summary
 				print(
-					"{timestamp}\t{memory}\tTrain Epoch {epoch}\tMain (Loss,Acc,Avg.Pred): ({loss:.5f},{acc:.5f},{pred:.3f})".format(
+					"{timestamp}\t{memory}\tTrain Epoch {epoch}\tMain (Loss,Acc|Acc|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = batch_i,
 						loss = e_loss_train,
 						acc = e_acc_train,
+						modacc = e_modacc_train,
 						pred = e_pred_train
 					),
 					flush = True
@@ -477,7 +483,7 @@ if __name__ == '__main__':
 				# Reset test loader
 				print("{timestamp}\t{memory}\tTesting...".format(timestamp=timestamp(), memory=memory_usage()))
 				test_loader.reset()
-				e_loss_test, e_acc_test, e_pred_test = 0, 0, 0
+				e_loss_test, e_acc_test, e_modacc_test, e_pred_test = 0, 0, 0, 0
 				for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), batches_per_epoch):
 
 					# Get features, problem sizes, labels
@@ -497,47 +503,53 @@ if __name__ == '__main__':
 					#end
 
 					# Run one SGD iteration
-					loss, acc, pred = sess.run(
-						[ GNN["loss"], GNN["acc"], GNN["avg_pred"] ],
+					loss, acc, modacc, pred = sess.run(
+						[ GNN["loss"], GNN["acc"], GNN["modacc"], GNN["avg_pred"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["Msrc"]:	dense_to_sparse(Msrc),
 							GNN["gnn"].matrix_placeholders["Mtgt"]:	dense_to_sparse(Mtgt),
 							GNN["gnn"].matrix_placeholders["W"]:	dense_to_sparse(W),
-							GNN["n_vertices"]:						n_vertices,
-							GNN["n_edges"]:							n_edges,
-							GNN["gnn"].time_steps: 					time_steps,
-							GNN["labels"]: 							solution
+							GNN["n_vertices"]: n_vertices,
+							GNN["n_edges"]: n_edges,
+							GNN["gnn"].time_steps: time_steps,
+							GNN["labels"]: solution
 						}
 					)
 
 					e_loss_test += loss
 					e_acc_test += acc
+					e_modacc_test += modacc
 					e_pred_test += pred
 				#end
 				e_loss_test /= batches_per_epoch
 				e_acc_test /= batches_per_epoch
+				e_modacc_test /= batches_per_epoch
 				e_pred_test /= batches_per_epoch
 				# Print test epoch summary
 				print(
-					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,Acc): ({loss:.5f},{acc:.5f},{pred:.3f})".format(
+					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,Acc|Acc|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = batch_i,
 						loss = e_loss_test,
 						acc = e_acc_test,
+						modacc = modacc,
 						pred = e_pred_test
 					),
 					flush = True
 				)
 
 				# Write train and test results into log file
-				logfile.write("{epoch} {loss_train} {acc_train} {loss_test} {acc_test}\n".format(
+				logfile.write("{epoch} {loss_train} {acc_train} {modacc_train} {loss_test} {acc_test} {modacc_test}\n".format(
 					epoch = epoch,
 					loss_train = e_loss_train,
 					acc_train = e_acc_train,
+					modacc_train = e_modacc_train,
 					loss_test = e_loss_test,
-					acc_test = e_acc_test))
+					acc_test = e_acc_test),
+					modacc_test = e_modacc_test
+				)
 				logfile.flush()
 			#end
 		#end
