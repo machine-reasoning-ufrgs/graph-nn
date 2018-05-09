@@ -10,6 +10,7 @@ from mlp import Mlp
 # Import tools
 #import itertools
 from util import timestamp, memory_usage
+from dijkstra_util import create_graph_nonquiver as create_graph, create_batch_nonquiver as create_batch
 
 def build_network(d):
 
@@ -65,7 +66,7 @@ def build_network(d):
 			]
 		},
 		name="Dijkstra",
-		float_dype = tf.float32
+		float_dtype = tf.float32
 	)
 
 	# Define L_vote
@@ -114,7 +115,8 @@ def build_network(d):
 	# Define loss, %error
 	predict_costs = tf.losses.mean_squared_error( labels = instance_val, predictions = predicted_val )
 	predict_cost = tf.reduce_mean( predict_costs )
-	# "%Error"
+	# %Error
+	abserror = tf.reduce_mean( tf.divide( tf.abs( tf.subtract( instance_val, predicted_val ) ), predicted_val ) )
 	error = tf.reduce_mean( tf.divide( tf.subtract( instance_val, predicted_val ), predicted_val ) )
 	vars_cost = tf.zeros([])
 	tvars = tf.trainable_variables()
@@ -132,211 +134,11 @@ def build_network(d):
 	GNN["predicted_val"] = predicted_val
 	GNN["loss"] = loss
 	GNN["%error"] = error
+	GNN["%abserror"] = abserror
 	GNN["train_step"] = train_step
+	GNN["nop"] = tf.no_op()
 	return GNN
 #end build_network
-
-def create_graph( g_n, edge_probability, max_multiplier = 2 ):
-	Gs = None
-	while Gs is None:
-		Gs = _create_graph( g_n, edge_probability, max_multiplier )
-	#end while
-	return Gs
-#end create_graph
-
-def _create_graph( g_n, edge_probability, max_multiplier = 2 ):
-	k = np.random.randint( 2, max_multiplier + 1 )
-	# Create the main graph along with a scaled version of it
-	M1_index = []
-	M1_values = []
-	M2_index = []
-	M2_values = []
-	M3_index = []
-	M3_values = []
-	G1 = nx.fast_gnp_random_graph( g_n, edge_probability )
-	G2 = G1.copy()
-	f1_norm = 0
-	f2_norm = 0
-	for s, t in G1.edges:
-		G1[s][t]["distance"] = np.random.rand()
-		M1_index.append( ( s, t ) )
-		M1_values.append( 1 / ( 1 + G1[s][t]["distance"] ) )
-		M1_index.append( ( t, s ) )
-		M1_values.append( 1 / ( 1 + G1[s][t]["distance"] ) )
-		f1_norm += 2 * G1[s][t]["distance"]
-		G2[s][t]["distance"] = G1[s][t]["distance"] * k
-		M2_index.append( ( s, t ) )
-		M2_values.append( 1 / ( 1 + G2[s][t]["distance"] ) )
-		M2_index.append( ( t, s ) )
-		M2_values.append( 1 / ( 1 + G2[s][t]["distance"] ) )
-		f2_norm += 2 * G2[s][t]["distance"]
-	#end for
-	S = np.random.randint( 0, g_n )
-	T = S
-	while T == S:
-		T = np.random.randint( 0, g_n )
-	#end while
-	if not nx.has_path( G1, S, T ):
-		return None
-	#end if
-	path = nx.shortest_path( G1, S, T, "distance" )
-	f1 = nx.shortest_path_length( G1, S, T, "distance" )
-	f2 = nx.shortest_path_length( G2, S, T, "distance" )
-	# Then create a complementary graph with the shortest path removed
-	G3 = G1.copy()
-	for node in path:
-		if node not in [S,T]:
-			G3.remove_node( node )
-		#end if
-	#end for
-	if not nx.has_path( G3, S, T ):
-		return None
-	#end if
-	f3_norm = 0
-	for s, t in G3.edges:
-		M3_index.append( ( s, t ) )
-		M3_values.append( 1 / ( 1 + G3[s][t]["distance"] ) )
-		M3_index.append( ( t, s ) )
-		M3_values.append( 1 / ( 1 + G3[s][t]["distance"] ) )
-		f3_norm += 2 * G3[s][t]["distance"]
-	#end for
-	f3 = nx.shortest_path_length( G3, S, T, "distance" )
-	M1 = [M1_index,M1_values,(g_n,g_n)]
-	M2 = [M2_index,M2_values,(g_n,g_n)]
-	M3 = [M3_index,M3_values,(g_n,g_n)]
-	S_mat = [[(S,S)],[1],(g_n,g_n)]
-	T_mat = [[(T,T)],[1],(g_n,g_n)]
-	f1_norm = f1_norm if f1_norm > 0 else 1
-	f2_norm = f2_norm if f2_norm > 0 else 1
-	f3_norm = f3_norm if f3_norm > 0 else 1
-	return ((M1,S_mat,T_mat),f1/f1_norm), ((M2,S_mat,T_mat),f2/f2_norm), ((M3,S_mat,T_mat),f3/f3_norm)
-#end _create_graph
-
-def create_graph2( g_n, edge_probability, max_multiplier = 2 ):
-	Gs = None
-	while Gs is None:
-		Gs = _create_graph2( g_n, edge_probability, max_multiplier )
-	#end while
-	return Gs
-#end create_graph2
-
-def _create_graph2( g_n, edge_probability, max_multiplier = 2, factor = 2 ):
-	nb = g_n//2
-	na = g_n - nb
-	
-	Ga = nx.fast_gnp_random_graph( na, edge_probability )
-	for s, t in Ga.edges:
-		Ga[s][t]["distance"] = np.random.rand()
-	#end
-	Gb = nx.fast_gnp_random_graph( nb, edge_probability )
-	for s, t in Gb.edges:
-		Gb[s][t]["distance"] = np.random.rand()
-	#end
-	
-	Gb = nx.relabel.convert_node_labels_to_integers(Gb, first_label=na)
-	
-	sa = np.random.randint( 0, na )
-	distances = [ ( ta, nx.shortest_path_length( Ga, sa, ta, weight="distance" ) ) for ta in range(0,na) if ta != sa and nx.has_path( Ga, sa, ta ) ]
-	distances.sort( key = lambda ta_d: ta_d[1] )
-	if len( distances ) == 0:
-		return None
-	#end if
-	ta,da = distances[-1]
-	sb = np.random.randint( na, na+nb )
-	distances = [ ( tb, nx.shortest_path_length( Gb, sb, tb, weight="distance" ) ) for tb in range(na, na+nb) if tb != sb and nx.has_path( Gb, sb, tb ) ]
-	distances = [ (tb,db) for tb,db in distances if db < 2 + da/factor ]
-	if len( distances ) == 0:
-		return None
-	#end if
-	tb,db = distances[ np.random.randint( 0, len( distances ) ) ]
-	
-	G1 = nx.union( Ga, Gb )
-	G1.add_edge( sa, sb )
-	G1[sa][sb]["distance"] = np.random.rand()
-	G2 = G1.copy()
-	G2.add_edge( ta, tb )
-	G2[ta][tb]["distance"] = np.random.rand()
-	
-	d1 = nx.shortest_path_length( G1, sa, ta, weight="distance" )
-	p1 = nx.shortest_path( G1, sa, ta, weight="distance" )
-	d2 = nx.shortest_path_length( G2, sa, ta, weight="distance" )
-	p2 = nx.shortest_path( G2, sa, ta, weight="distance" )
-	if d1 < d2 or p1 == p2:
-		return None
-	#end if
-	M1_index = []
-	M1_values = []
-	M2_index = []
-	M2_values = []
-	d1_norm = 0
-	d2_norm = 0
-	for s, t in G1.edges:
-		M1_index.append( ( s, t ) )
-		M1_values.append( 1 / ( 1 + G1[s][t]["distance"] ) )
-		M1_index.append( ( t, s ) )
-		M1_values.append( 1 / ( 1 + G1[s][t]["distance"] ) )
-		d1_norm += 2 * G1[s][t]["distance"]
-	#end for
-	for s, t in G2.edges:
-		M2_index.append( ( s, t ) )
-		M2_values.append( 1 / ( 1 + G2[s][t]["distance"] ) )
-		M2_index.append( ( t, s ) )
-		M2_values.append( 1 / ( 1 + G2[s][t]["distance"] ) )
-		d2_norm += 2 * G2[s][t]["distance"]
-	#end for
-	M1 = [M1_index,M1_values,(g_n,g_n)]
-	M2 = [M2_index,M2_values,(g_n,g_n)]
-	S_mat = [[(sa,sa)],[1],(g_n,g_n)]
-	T_mat = [[(ta,ta)],[1],(g_n,g_n)]
-	d1_norm = d1_norm if d1_norm > 0 else 1
-	d2_norm = d2_norm if d2_norm > 0 else 1
-	return ((M1,S_mat,T_mat),d1/d1_norm), ((M2,S_mat,T_mat),d2/d2_norm), None
-#end _create_graph2
-
-def reindex_matrix( n, m, M ):
-	new_index = []
-	new_value = []
-	for i, v in zip( M[0], M[1] ):
-		s, t = i
-		new_index.append( (n + s, m + t) )
-		new_value.append( v )
-	#end for
-	return zip( new_index, new_value )
-
-def create_batch(problems):
-	n = 0
-	m = 0
-	batch_M_index = []
-	batch_M_value = []
-	batch_S_index = []
-	batch_S_value = []
-	batch_T_index = []
-	batch_T_value = []
-	for p in problems:
-		if p is None:
-			continue
-		#end if
-		M, S, T = p
-		for i, v in reindex_matrix( n, n, M ):
-			batch_M_index.append( i )
-			batch_M_value.append( v )
-		#end for
-		for i, v in reindex_matrix( n, n, S ):
-			batch_S_index.append( i )
-			batch_S_value.append( v )
-		#end for
-		for i, v in reindex_matrix( n, n, T ):
-			batch_T_index.append( i )
-			batch_T_value.append( v )
-		#end for
-		n += M[2][0]
-		m += len(M[0])
-	#end for
-	M = [batch_M_index,batch_M_value,(n,n)]
-	S = [batch_S_index,batch_S_value,(n,n)]
-	T = [batch_T_index,batch_T_value,(n,n)]
-	return (M,S,T)
-#end create_batch
 
 if __name__ == '__main__':
 	d = 64
@@ -367,6 +169,7 @@ if __name__ == '__main__':
 			#instance_generator.reset()
 			epoch_loss = 0.0
 			epoch_err = 0
+			epoch_abserr = 0
 			epoch_n = 0
 			epoch_m = 0
 			for batch_i in range( batches_per_epoch ):
@@ -383,7 +186,7 @@ if __name__ == '__main__':
 						n_acc += g_n * 3
 						instances += 3
 						max_n = max( max_n, g_n )
-						(g1,f1),(g2,f2),_ = create_graph2( g_n, edge_probability )
+						(g1,f1),(g2,f2),_ = create_graph( g_n, edge_probability )
 						Gs = Gs + [g1,g2]
 						distances = distances + [f1,f2]
 					else:
@@ -397,8 +200,8 @@ if __name__ == '__main__':
 				n = M[2][0]
 				m = len( M[0] )
 
-				_, loss, err = sess.run(
-					[ GNN["train_step"], GNN["loss"], GNN["%error"] ],
+				_, loss, err, abserr = sess.run(
+					[ GNN["train_step"], GNN["loss"], GNN["%error"], GNN["%abserror"] ],
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["M"]: M,
 						GNN["gnn"].matrix_placeholders["S"]: S,
@@ -410,17 +213,19 @@ if __name__ == '__main__':
 				
 				epoch_loss += loss
 				epoch_err += err
+				epoch_abserr += err
 				epoch_n += n
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,``%Error''): ({loss:.5f},{error:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,%Error|%Error|): ({loss:.5f},{error:.5f}|{abserror:.5f}|)".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = batch_i,
 						loss = loss,
 						error = err,
+						abserror = abserr,
 						n = n,
 						m = m,
 						i = instances
@@ -429,16 +234,18 @@ if __name__ == '__main__':
 				)
 			#end for
 			# Summarize Epoch
-			epoch_loss = epoch_loss / batches_per_epoch
-			epoch_err = epoch_err / batches_per_epoch
+			epoch_loss /= batches_per_epoch
+			epoch_err /= batches_per_epoch
+			epoch_abserr /= batches_per_epoch
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,``%Error''): ({loss:.5f},{error:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Mean (Loss,%Error|%Error|): ({loss:.5f},{error:.5f}|{abserror:.5f}|)".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "all",
 					loss = epoch_loss,
 					error = epoch_err,
+					abserror = epoch_abserr,
 					n = epoch_n,
 					m = epoch_m,
 				),
@@ -462,7 +269,7 @@ if __name__ == '__main__':
 					n_acc += g_n
 					instances += 1
 					max_n = max( max_n, g_n )
-					(g1,f1),_,_ = create_graph2( g_n, edge_probability )
+					(g1,f1),_,_ = create_graph( g_n, edge_probability )
 					Gs.append( g1 )
 					distances.append( f1 )
 				else:
@@ -476,8 +283,8 @@ if __name__ == '__main__':
 			test_n = M[2][0]
 			test_m = len( M[0] )
 			
-			test_loss, test_err = sess.run(
-				[GNN["loss"],GNN["%error"]],
+			test_loss, test_err, test_abserr = sess.run(
+				[GNN["loss"],GNN["%error"],GNN["%abserror"]],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].matrix_placeholders["S"]: S,
@@ -487,12 +294,13 @@ if __name__ == '__main__':
 				}
 			)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,``%Error''): ({loss:.5f},{error:.5f})".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| Test (Loss,%Error|%Error|): ({loss:.5f},{error:.5f}|{abserror:.5f}|)".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "tst",
 					loss = test_loss,
+					abserror = test_abserr,
 					error = test_err,
 					n = test_n,
 					m = test_m,

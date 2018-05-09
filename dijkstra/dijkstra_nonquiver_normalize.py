@@ -10,7 +10,7 @@ from mlp import Mlp
 # Import tools
 #import itertools
 from util import timestamp, memory_usage
-from dijkstra_util import create_graph, create_batch
+from dijkstra_util import create_graph_nonquiver as create_graph, create_batch_nonquiver as create_batch
 
 def build_network(d):
 
@@ -40,58 +40,34 @@ def build_network(d):
 	# Define Graph neural network
 	gnn = GraphNN(
 		{
-			"N": d, # Nodes
-			"E": d  # Edges
+			"N": d
 		},
 		{
-			"Ms": ("N","E"), # Matrix pointing from nodes to the edges they are sources
-			"Mt": ("N","E"), # Matrix pointing from nodes to the edges they are targets 
-			"Mw": ("E","E"), # Matrix indicating an Edge weight
-			"S": ("N","N"), # Matrix indicating whether a node is the source
+			"M": ("N","N"),
+			"S": ("N","N")
 		},
 		{
-			"NsmsgE": ("N","E"), # Message cast to convert messages from node sources to edges
-			"NtmsgE": ("N","E"), # Message cast to convert messages from node targets to edges
-			"EmsgNs": ("N","E"), # Message cast to convert messages from edges to node sources
-			"EmsgNt": ("N","E")  # Message cast to convert messages from edges to node targets
+			"Nmsg": ("N","N")
 		},
 		{
 			"N": [
 				{
-					"mat": "Ms",
-					"msg": "EmsgNs",
-					"var": "E"
+					"mat": "M",
+					"var": "N"
 				},
 				{
-					"mat": "Mt",
-					"msg": "EmsgNt",
-					"var": "E"
+					"mat": "M",
+					"transpose?": True,
+					"var": "N"
 				},
 				{
 					"mat": "S"
 				}
-			],
-			"E": [
-				{
-					"mat": "Ms",
-					"transpose?": True,
-					"msg": "NsmsgE",
-					"var": "N"
-				},
-				{
-					"mat": "Mt",
-					"transpose?": True,
-					"msg": "NtmsgE",
-					"var": "N"
-				},
-				{
-					"mat": "Mw"
-				}
 			]
 		},
-		name="Dijkstra_Quiver",
+		name="Dijkstra",
 		float_dtype = tf.float32
-		)
+	)
 
 	# Define L_vote
 	N_vote_MLP = Mlp(
@@ -105,7 +81,7 @@ def build_network(d):
 		)
 
 	# Compute the number of variables
-	n = tf.shape( gnn.matrix_placeholders["S"] )[0]
+	n = tf.shape( gnn.matrix_placeholders["M"] )[0]
 	# Compute number of problems
 	p = tf.shape( instance_val )[0]
 
@@ -136,7 +112,7 @@ def build_network(d):
 	)
 	predicted_val = predicted_val.stack()
 
-	# Define loss and %error
+	# Define loss, %error
 	predict_costs = tf.losses.mean_squared_error( labels = instance_val, predictions = predicted_val )
 	predict_cost = tf.reduce_mean( predict_costs )
 	# %Error
@@ -167,11 +143,11 @@ def build_network(d):
 if __name__ == '__main__':
 	d = 64
 	epochs = 100
-	batch_n_max = 2048
+	batch_n_max = 4096
 	batches_per_epoch = 32
 	n_size_min = 16
 	n_loss_increase_threshold = 0.01
-	n_size_max = 128
+	n_size_max = 512
 	edge_probability = 0.25
 
 	# Build model
@@ -181,7 +157,6 @@ if __name__ == '__main__':
 	# Disallow GPU use
 	config = tf.ConfigProto( device_count = {"GPU":0})
 	with tf.Session(config=config) as sess:
-		
 		# Initialize global variables
 		print( "{timestamp}\t{memory}\tInitializing global variables ... ".format( timestamp = timestamp(), memory = memory_usage() ) )
 		sess.run( tf.global_variables_initializer() )
@@ -197,8 +172,8 @@ if __name__ == '__main__':
 			epoch_abserr = 0
 			epoch_n = 0
 			epoch_m = 0
-			#for b, batch in itertools.islice( enumerate( instance_generator.get_batches( batch_size ) ), batches_per_epoch ):
 			for batch_i in range( batches_per_epoch ):
+				# Create random graphs
 				batch_n_size = np.random.randint( n_size_min, n_size+1 )
 				n_acc = 0
 				max_n = 0
@@ -211,27 +186,24 @@ if __name__ == '__main__':
 						n_acc += g_n * 3
 						instances += 3
 						max_n = max( max_n, g_n )
-						(g1,f1),(g2,f2),_ = create_graph( g_n, edge_probability )
+						(g1,f1),(g2,f2),_ = create_graph( g_n, edge_probability, normalize = True )
 						Gs = Gs + [g1,g2]
 						distances = distances + [f1,f2]
 					else:
 						break
 					#end if
 				#end for
-				Ms, Mt, Mw, S, T, _, _, _ = create_batch( Gs )
+				M, S, T = create_batch( Gs )
 				targets = [ t for (t,_) in T[0] ]
 				time_steps = max_n
 				batch_allowed_error = sum( distances ) * n_loss_increase_threshold
-				n = Ms[2][0]
-				m = Ms[2][1]
-				
+				n = M[2][0]
+				m = len( M[0] )
 
 				_, loss, err, abserr = sess.run(
 					[ GNN["train_step"], GNN["loss"], GNN["%error"], GNN["%abserror"] ],
 					feed_dict = {
-						GNN["gnn"].matrix_placeholders["Ms"]: Ms,
-						GNN["gnn"].matrix_placeholders["Mt"]: Mt,
-						GNN["gnn"].matrix_placeholders["Mw"]: Mw,
+						GNN["gnn"].matrix_placeholders["M"]: M,
 						GNN["gnn"].matrix_placeholders["S"]: S,
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_val"]: distances,
@@ -241,7 +213,7 @@ if __name__ == '__main__':
 				
 				epoch_loss += loss
 				epoch_err += err
-				epoch_abserr += abserr
+				epoch_abserr += err
 				epoch_n += n
 				epoch_m += m
 				
@@ -297,26 +269,24 @@ if __name__ == '__main__':
 					n_acc += g_n
 					instances += 1
 					max_n = max( max_n, g_n )
-					(g1,f1),_,_ = create_graph( g_n, edge_probability )
+					(g1,f1),_,_ = create_graph( g_n, edge_probability, normalize = True )
 					Gs.append( g1 )
 					distances.append( f1 )
 				else:
 					break
 				#end if
 			#end for
-			Ms, Mt, Mw, S, T, _, _, _ = create_batch( Gs )
+			M, S, T = create_batch( Gs )
 			targets = [ t for (t,_) in T[0] ]
 			time_steps = max_n
 			test_allowed_error = sum( distances ) * n_loss_increase_threshold
-			test_n = Ms[2][0]
-			test_m = Ms[2][1]
-
+			test_n = M[2][0]
+			test_m = len( M[0] )
+			
 			test_loss, test_err, test_abserr = sess.run(
 				[GNN["loss"],GNN["%error"],GNN["%abserror"]],
 				feed_dict = {
-					GNN["gnn"].matrix_placeholders["Ms"]: Ms,
-					GNN["gnn"].matrix_placeholders["Mt"]: Mt,
-					GNN["gnn"].matrix_placeholders["Mw"]: Mw,
+					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].matrix_placeholders["S"]: S,
 					GNN["gnn"].time_steps: time_steps,
 					GNN["instance_val"]: distances,
@@ -330,8 +300,8 @@ if __name__ == '__main__':
 					epoch = epoch,
 					batch = "tst",
 					loss = test_loss,
-					error = test_err,
 					abserror = test_abserr,
+					error = test_err,
 					n = test_n,
 					m = test_m,
 					i = instances

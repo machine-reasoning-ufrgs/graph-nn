@@ -24,6 +24,7 @@ def build_network(d):
 
 	# Define placeholder for result values (one per problem)
 	instance_val = tf.placeholder( tf.float32, [ None ], name = "instance_val" )
+	instance_m_list = tf.placeholder( tf.int32, [ None ], name = "instance_edge_num" )
 	instance_target = tf.placeholder( tf.int32, [ None ], name = "instance_target" )
 
 	# Define INV, a tf function to exchange positive and negative literal embeddings
@@ -48,6 +49,7 @@ def build_network(d):
 			"Mt": ("N","E"), # Matrix pointing from nodes to the edges they are targets 
 			"Mw": ("E","E"), # Matrix indicating an Edge weight
 			"S": ("N","N"), # Matrix indicating whether a node is the source
+			"T": ("N","N"), # Matrix indicating whether a node is the target
 		},
 		{
 			"NsmsgE": ("N","E"), # Message cast to convert messages from node sources to edges
@@ -69,6 +71,9 @@ def build_network(d):
 				},
 				{
 					"mat": "S"
+				},
+				{
+					"mat": "T"
 				}
 			],
 			"E": [
@@ -94,45 +99,48 @@ def build_network(d):
 		)
 
 	# Define L_vote
-	N_vote_MLP = Mlp(
+	E_vote_MLP = Mlp(
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
 		output_size = 1,
-		name = "N_vote",
+		name = "E_vote",
 		name_internal_layers = True,
 		kernel_initializer = tf.contrib.layers.xavier_initializer(),
 		bias_initializer = tf.zeros_initializer()
 		)
 
 	# Compute the number of variables
-	n = tf.shape( gnn.matrix_placeholders["S"] )[0]
+	m = tf.shape( gnn.matrix_placeholders["Mw"] )[0]
 	# Compute number of problems
 	p = tf.shape( instance_val )[0]
 
 	# Get the last embeddings
-	N_n = gnn.last_states["N"].h
-	N_vote = N_vote_MLP( N_n )
+	E_n = gnn.last_states["E"].h
+	E_vote_logits = E_vote_MLP( E_n )
+	E_vote = tf.nn.sigmoid( E_vote_logits )
+	E_objective = tf.sparse_tensor_dense_matmul( gnn.matrix_placeholders["Mw"], E_vote )
 
 	# Reorganize votes' result to obtain a prediction for each problem instance
-	def _vote_while_cond(i, predicted_val):
+	def _vote_while_cond(i, m_acc, predicted_val):
 		return tf.less( i, p )
 	#end _vote_while_cond
 
-	def _vote_while_body(i, predicted_val):
-		# Gather the target node for that problem
-		final_node = N_vote[ instance_target[i] ]
-		# Concatenate positive and negative literals and average their vote values
-		problem_predicted_val = tf.reshape( final_node, shape = [] )
+	def _vote_while_body(i, m_acc, predicted_val):
+		# Helper for the amount of edges in this problem
+		i_m = instance_m_list[i]
+		# Gather the edges of that problem
+		obj_vals = tf.gather( E_objective, tf.range( m_acc, tf.add( m_acc, i_m ) ) )
+		problem_predicted_val = tf.reduce_sum( obj_vals )
 		# Update TensorArray
 		predicted_val = predicted_val.write( i, problem_predicted_val )
-		return tf.add( i, tf.constant( 1 ) ), predicted_val
+		return tf.add( i, tf.constant( 1 ) ), tf.add( m_acc, i_m ), predicted_val
 	#end _vote_while_body
 			
 	predicted_val = tf.TensorArray( size = p, dtype = tf.float32 )
-	_, predicted_val = tf.while_loop(
+	_, _, predicted_val = tf.while_loop(
 		_vote_while_cond,
 		_vote_while_body,
-		[ tf.constant( 0, dtype = tf.int32 ), predicted_val ]
+		[ tf.constant( 0, dtype = tf.int32 ), tf.constant( 0, dtype = tf.int32 ), predicted_val ]
 	)
 	predicted_val = predicted_val.stack()
 
@@ -155,6 +163,7 @@ def build_network(d):
 	GNN["gnn"] = gnn
 	GNN["instance_val"] = instance_val
 	GNN["instance_target"] = instance_target
+	GNN["instance_m"] = instance_m_list
 	GNN["predicted_val"] = predicted_val
 	GNN["loss"] = loss
 	GNN["%error"] = error
@@ -218,7 +227,7 @@ if __name__ == '__main__':
 						break
 					#end if
 				#end for
-				Ms, Mt, Mw, S, T, _, _, _ = create_batch( Gs )
+				Ms, Mt, Mw, S, T, _, mlist, _ = create_batch( Gs )
 				targets = [ t for (t,_) in T[0] ]
 				time_steps = max_n
 				batch_allowed_error = sum( distances ) * n_loss_increase_threshold
@@ -233,8 +242,10 @@ if __name__ == '__main__':
 						GNN["gnn"].matrix_placeholders["Mt"]: Mt,
 						GNN["gnn"].matrix_placeholders["Mw"]: Mw,
 						GNN["gnn"].matrix_placeholders["S"]: S,
+						GNN["gnn"].matrix_placeholders["T"]: T,
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_val"]: distances,
+						GNN["instance_m"]: mlist,
 						GNN["instance_target"]: targets
 					}
 				)
@@ -304,7 +315,7 @@ if __name__ == '__main__':
 					break
 				#end if
 			#end for
-			Ms, Mt, Mw, S, T, _, _, _ = create_batch( Gs )
+			Ms, Mt, Mw, S, T, _, mlist, _ = create_batch( Gs )
 			targets = [ t for (t,_) in T[0] ]
 			time_steps = max_n
 			test_allowed_error = sum( distances ) * n_loss_increase_threshold
@@ -318,8 +329,10 @@ if __name__ == '__main__':
 					GNN["gnn"].matrix_placeholders["Mt"]: Mt,
 					GNN["gnn"].matrix_placeholders["Mw"]: Mw,
 					GNN["gnn"].matrix_placeholders["S"]: S,
+					GNN["gnn"].matrix_placeholders["T"]: T,
 					GNN["gnn"].time_steps: time_steps,
 					GNN["instance_val"]: distances,
+					GNN["instance_m"]: mlist,
 					GNN["instance_target"]: targets
 				}
 			)
