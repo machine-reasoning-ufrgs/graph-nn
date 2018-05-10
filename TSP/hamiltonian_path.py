@@ -322,7 +322,7 @@ if __name__ == '__main__':
 		print("Creating {} train instances...".format(samples))
 		create_dataset(20, path="Hamiltonian-train", samples=samples)
 		print("Creating {} test instances...".format(samples))
-		create_dataset(20, path="Hamiltonian-train", samples=samples)
+		create_dataset(20, path="Hamiltonian-test", samples=samples)
 	#end
 
 	# Build model
@@ -331,7 +331,7 @@ if __name__ == '__main__':
 
 	# Create train, test loaders
 	train_loader 	= InstanceLoader("Hamiltonian-train")
-	#test_loader		= InstanceLoader("Hamiltonian-test")
+	test_loader		= InstanceLoader("Hamiltonian-test")
 
 	# Disallow GPU use
 	config = tf.ConfigProto( device_count = {"GPU":0})
@@ -342,7 +342,7 @@ if __name__ == '__main__':
 		sess.run( tf.global_variables_initializer() )
 
 		# Restore saved weights
-		if load_checkpoints: load_weights(sess,"./checkpoints");
+		if load_checkpoints: load_weights(sess,"./hamiltonian-checkpoints");
 
 		with open("log-Hamiltonian.dat","w") as logfile:
 			# Run for a number of epochs
@@ -407,7 +407,7 @@ if __name__ == '__main__':
 					flush = True
 				)
 
-				if save_checkpoints: save_weights(sess,"./checkpoints");
+				if save_checkpoints: save_weights(sess,"./hamiltonian-checkpoints");
 
 				# Reset test loader
 				print("{timestamp}\t{memory}\tTesting...".format(timestamp=timestamp(), memory=memory_usage()))
