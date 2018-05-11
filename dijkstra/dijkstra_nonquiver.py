@@ -270,7 +270,7 @@ if __name__ == '__main__':
 					instances += 1
 					max_n = max( max_n, g_n )
 					(g1,f1),(g2,f2),_ = create_graph( g_n, edge_probability )
-					g,f = np.random.choice( [(g1,f1),(g2,f2)] )
+					g,f = (g1,f1) if np.random.rand() < 0.5 else (g2,f2)
 					Gs.append( g )
 					distances.append( f )
 				else:
