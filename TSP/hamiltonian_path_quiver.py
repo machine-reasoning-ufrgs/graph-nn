@@ -339,13 +339,13 @@ def dense_to_quiver( Ma, Mw=None, undirected=True ):
 	for i in range( Ma.shape[0] ):
 		for j in range( Ma.shape[1] ):
 			if Ma[i,j] != 0:
-				Ms_index.append( i, e )
-				Mt_index.append( j, e )
+				Ms_index.append( (i, e) )
+				Mt_index.append( (j, e) )
 				if undirected:
-					Ms_index.append( j, e )
-					Mt_index.append( i, e )
+					Ms_index.append( (j, e) )
+					Mt_index.append( (i, e) )
 				#end if
-				Mw_index.append( e, e )
+				Mw_index.append( (e, e) )
 				Mw_value.append( Mw[i,j] if Mw is not None else 1 )
 				e += 1
 			#end if
