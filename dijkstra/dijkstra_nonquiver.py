@@ -116,8 +116,8 @@ def build_network(d):
 	predict_costs = tf.losses.mean_squared_error( labels = instance_val, predictions = predicted_val )
 	predict_cost = tf.reduce_mean( predict_costs )
 	# %Error
-	abserror = tf.reduce_mean( tf.divide( tf.abs( tf.subtract( instance_val, predicted_val ) ), predicted_val ) )
-	error = tf.reduce_mean( tf.divide( tf.subtract( instance_val, predicted_val ), predicted_val ) )
+	abserror = tf.reduce_mean( tf.divide( tf.abs( tf.subtract( instance_val, predicted_val ) ), instance_val ) )
+	error = tf.reduce_mean( tf.divide( tf.subtract( instance_val, predicted_val ), instance_val ) )
 	vars_cost = tf.zeros([])
 	tvars = tf.trainable_variables()
 	for var in tvars:
