@@ -471,12 +471,15 @@ if __name__ == '__main__':
 
 					# Get features, problem sizes, labels
 					Ma_all, Mw_all, n_vertices, n_edges, solution = batch
+					Ms, Mt, Mw = dense_to_quiver( Ma_all )
 
 					# Run one SGD iteration
 					loss, acc, pred = sess.run(
 						[ GNN["loss"], GNN["acc"], GNN["avg_pred"] ],
 						feed_dict = {
-							GNN["gnn"].matrix_placeholders["M"]:	dense_to_sparse(Ma_all),
+							GNN["gnn"].matrix_placeholders["Ms"]:	Ms,
+							GNN["gnn"].matrix_placeholders["Mt"]:	Mt,
+							GNN["gnn"].matrix_placeholders["Mw"]:	Mw,
 							GNN["n_vertices"]:						n_vertices,
 							GNN["n_edges"]:							n_edges,
 							GNN["gnn"].time_steps: 					time_steps,
