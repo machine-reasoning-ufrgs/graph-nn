@@ -335,7 +335,7 @@ def save_weights(sess,path,scope=None):
 if __name__ == '__main__':
 	
 	create_datasets 	= False
-	load_checkpoints	= False
+	load_checkpoints	= True
 	save_checkpoints	= True
 
 	d 					= 128
@@ -418,7 +418,7 @@ if __name__ == '__main__':
 
 					# Print batch summary
 					print(
-						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Acc|Acc|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
+						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,%Err|%Err|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
 							timestamp = timestamp(),
 							memory = memory_usage(),
 							epoch = epoch,
@@ -440,7 +440,7 @@ if __name__ == '__main__':
 				e_pred_train /= batches_per_epoch
 				# Print train epoch summary
 				print(
-					"{timestamp}\t{memory}\tTrain Epoch {epoch}\tMain (Loss,Acc|Acc|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
+					"{timestamp}\t{memory}\tTrain Epoch {epoch}\tMain (Loss,%Err|%Err|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
@@ -502,7 +502,7 @@ if __name__ == '__main__':
 				e_pred_test /= batches_per_epoch
 				# Print test epoch summary
 				print(
-					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,Acc|Acc|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
+					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,%Err|%Err|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
@@ -522,8 +522,9 @@ if __name__ == '__main__':
 					acc_train = e_acc_train,
 					modacc_train = e_modacc_train,
 					loss_test = e_loss_test,
-					acc_test = e_acc_test),
+					acc_test = e_acc_test,
 					modacc_test = e_modacc_test
+					)
 				)
 				logfile.flush()
 			#end
