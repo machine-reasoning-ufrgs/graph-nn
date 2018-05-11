@@ -3,8 +3,6 @@ import tensorflow as tf
 import numpy as np
 import random
 from itertools import islice
-from joblib import Parallel, delayed
-import multiprocessing
 from ortools.constraint_solver import pywrapcp
 from ortools.constraint_solver import routing_enums_pb2
 # Add the parent folder path to the sys.path list for importing
@@ -12,51 +10,8 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 # Import model builder
 from graphnn import GraphNN
 from mlp import Mlp
-from util import timestamp, memory_usage, dense_to_sparse
-
-class InstanceLoader(object):
-
-	def __init__(self,path):
-		self.path = path
-
-		self.filenames = [ path + '/' + x for x in os.listdir(path) ]
-		self.reset()
-	#end
-
-	def get_instances(self, n_instances):
-		for i in range(n_instances):
-			yield read_graph(self.filenames[self.index])
-			self.index += 1
-		#end
-	#end
-
-	def create_batch(self,instances):
-		n_vertices 	= np.array([ x[0].shape[0] for x in instances ])
-		n_edges		= np.array([ len(np.nonzero(x[0])[0]) for x in instances ])
-		solution	= np.array([ x[2] for x in instances ])
-		total_n 	= sum(n_vertices)
-
-		Ma_all, Mw_all = np.zeros((total_n,total_n)), np.zeros((total_n,total_n))
-		for (i,Ma,Mw) in [ (i,x[0],x[1]) for (i,x) in enumerate(instances) ]:
-			n_acc = sum(n_vertices[0:i])
-			Ma_all[n_acc:n_acc+n_vertices[i], n_acc:n_acc+n_vertices[i]] = Ma
-			Mw_all[n_acc:n_acc+n_vertices[i], n_acc:n_acc+n_vertices[i]] = Mw
-		#end
-
-		return Ma_all, Mw_all, n_vertices, n_edges, solution
-	#end
-
-	def get_batches(self, batch_size):
-		for i in range( len(self.filenames) // batch_size ):
-			yield self.create_batch(list(self.get_instances(batch_size)))
-		#end
-	#end
-
-	def reset(self):
-		random.shuffle( self.filenames )
-		self.index = 0
-	#end
-#end
+from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
+from tsp_utils import InstanceLoader, write_graph, read_graph
 
 def solve(M):
 	"""
@@ -107,50 +62,18 @@ def create_graph_pair(n):
 	return M1,M2
 #end
 
-def write_graph(Ma, Mw, solution, filepath):
-	with open(filepath,"w") as out:
-		# Write header 'p |V| |E| solution'
-		out.write("p {} {} {}\n".format(Ma.shape[0], len(np.nonzero(Ma)[0]), solution))
-
-		# Write edges
-		for (i,j) in zip(list(np.nonzero(Ma))[0], list(np.nonzero(Ma))[1]):
-			out.write("{} {} {}\n".format(i,j,Mw[i,j]))
-		#end
-	#end
-#end
-
-def read_graph(filepath):
-	with open(filepath,"r") as f:
-		n, m, solution = [ int(x) for x in f.readline().split()[1:]]
-		Ma = np.zeros((n,n),dtype=int)
-		Mw = np.zeros((n,n),dtype=int)
-		for edge in range(m):
-			i,j,w = [ int(float(x)) for x in f.readline().split() ]
-			Ma[i,j] = 1
-			Mw[i,j] = w
-		#end
-	#end
-	return Ma,Mw,solution
-#end
-
-def create_and_write(path,n,i):
-	M1,M2 = create_graph_pair(n)
-	print("Writing graph file n,m=({},{})".format(M1.shape[0], len(np.nonzero(M1)[0])))
-	print("Writing graph file n,m=({},{})".format(M2.shape[0], len(np.nonzero(M2)[0])))
-	write_graph(M1,np.zeros(M1.shape),0,"{}/{}.graph".format(path,2*i))
-	write_graph(M2,np.zeros(M2.shape),1,"{}/{}.graph".format(path,2*i+1))
-#end
-
 def create_dataset(n, path, samples=1000):
 
 	if not os.path.exists(path):
 		os.makedirs(path)
 	#end if
 
-	num_cores = multiprocessing.cpu_count()
-
 	for i in range(samples//2):
-		create_and_write(path,n,i)
+		M1,M2 = create_graph_pair(n)
+		print("Writing graph file n,m=({},{})".format(M1.shape[0], len(np.nonzero(M1)[0])))
+		print("Writing graph file n,m=({},{})".format(M2.shape[0], len(np.nonzero(M2)[0])))
+		write_graph(M1,np.zeros(M1.shape),0,"{}/{}.graph".format(path,2*i))
+		write_graph(M2,np.zeros(M2.shape),1,"{}/{}.graph".format(path,2*i+1))
 	#end
 #end
 
@@ -276,35 +199,6 @@ def build_network(d):
 	return GNN
 #end
 
-def load_weights(sess,path,scope=None):
-	if os.path.exists(path):
-		# Restore saved weights
-		print( "{timestamp}\t{memory}\tRestoring saved model ... ".format( timestamp = timestamp(), memory = memory_usage() ) )
-		# Create model saver
-		if scope is None:
-			saver = tf.train.Saver()
-		else:
-			saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=scope))
-		#end
-		saver.restore(sess, "%s/model.ckpt" % path)
-	#end if
-#end
-
-def save_weights(sess,path,scope=None):
-	# Create /tmp/ directory to save weights
-	if not os.path.exists(path):
-		os.makedirs(path)
-	#end if
-	# Create model saver
-	if scope is None:
-		saver = tf.train.Saver()
-	else:
-		saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=scope))
-	#end
-	saver.save(sess, "%s/model.ckpt" % path)
-	print( "{timestamp}\t{memory}\tMODEL SAVED IN PATH: {path}".format( timestamp = timestamp(), memory = memory_usage(), path=path ) )
-#end
-
 if __name__ == '__main__':
 	
 	create_datasets 	= True
@@ -379,8 +273,8 @@ if __name__ == '__main__':
 							timestamp = timestamp(),
 							memory = memory_usage(),
 							epoch = epoch,
-							batch = batch_i,
 							loss = loss,
+							batch_i = batch_i,
 							acc = acc,
 							pred = pred,
 							n = Ma_all.shape[0],
@@ -399,7 +293,6 @@ if __name__ == '__main__':
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
-						batch = batch_i,
 						loss = e_loss_train,
 						acc = e_acc_train,
 						pred = e_pred_train
@@ -443,7 +336,6 @@ if __name__ == '__main__':
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
-						batch = batch_i,
 						loss = e_loss_test,
 						acc = e_acc_test,
 						pred = e_pred_test
