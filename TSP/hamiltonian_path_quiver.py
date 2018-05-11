@@ -361,12 +361,12 @@ if __name__ == '__main__':
 	
 	create_datasets 	= False
 	load_checkpoints	= False
-	save_checkpoints	= False
+	save_checkpoints	= True
 
 	d 					= 128
 	epochs 				= 100
-	batch_size			= 3#32
-	batches_per_epoch 	= 2#128
+	batch_size			= 32
+	batches_per_epoch 	= 128
 	time_steps 			= 40
 
 	if create_datasets:
