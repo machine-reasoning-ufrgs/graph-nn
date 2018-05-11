@@ -31,11 +31,11 @@ def build_neurosat_quiver(d):
 		{
 			"L": d,
 			"C": d,
-			"E": d,
+			"E": d
 		},
 		{
-			"ML": 	("E","L"),
-			"MC": 	("E","C"),
+			"ML": ("E","L"),
+			"MC": ("E","C"),
 			"Mw":	("E","E")
 		},
 		{
@@ -46,13 +46,39 @@ def build_neurosat_quiver(d):
 		},
 		{
 			# Lᵗ⁺¹ ← Lᵤ( MLᵀ × E_msg_L(Eᵗ) )
-			"L": [ ("ML",None,"E_msg_L","E",True) ],
-
+			"L": [
+				{
+					"mat": "ML",
+					"transpose?": True,
+					"msg": "E_msg_L",
+					"var": "E"
+				}
+			],
 			# Cᵗ⁺¹ ← Cᵤ( MCᵀ × E_msg_C(Eᵗ) )
-			"C": [ ("MC",None,"E_msg_C","E",True) ],
-
+			"C": [
+				{
+					"mat": "MC",
+					"transpose?": True,
+					"msg": "E_msg_C",
+					"var": "E"
+				}
+			],
 			# Eᵗ⁺¹ ← Eᵤ( ML × L_msg_E(Lᵗ),  MC × C_msg_E(Cᵗ), Mw × 1 )
-			"E": [ ("ML",None,"L_msg_E","L"), ("MC",None,"C_msg_E","C"), ("Mw",None,None,None) ]
+			"E": [
+				{
+					"mat": "ML",
+					"msg": "L_msg_E",
+					"var": "L"
+				},
+				{
+					"mat": "MC",
+					"msg": "C_msg_E",
+					"var": "C"
+				},
+				{
+					"mat": "Mw"
+				}
+			]
 		},
 		name="NeuroSAT"
 		)
