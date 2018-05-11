@@ -143,7 +143,7 @@ def build_neurosat_quiver(d):
 if __name__ == '__main__':
 
 	d 					= 128
-	epochs 				= 20
+	epochs 				= 100
 	batch_size 			= 32
 	batches_per_epoch 	= 128
 	timesteps 			= 26
