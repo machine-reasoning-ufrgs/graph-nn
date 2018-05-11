@@ -207,9 +207,9 @@ if __name__ == '__main__':
 				distances = []
 				while True:
 					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
-					if n_acc + g_n * 3 < batch_n_max:
-						n_acc += g_n * 3
-						instances += 3
+					if n_acc + g_n * 2 < batch_n_max:
+						n_acc += g_n * 2
+						instances += 2
 						max_n = max( max_n, g_n )
 						(g1,f1),(g2,f2),_ = create_graph( g_n, edge_probability )
 						Gs = Gs + [g1,g2]
@@ -297,9 +297,10 @@ if __name__ == '__main__':
 					n_acc += g_n
 					instances += 1
 					max_n = max( max_n, g_n )
-					(g1,f1),_,_ = create_graph( g_n, edge_probability )
-					Gs.append( g1 )
-					distances.append( f1 )
+					(g1,f1),(g2,f2),_ = create_graph( g_n, edge_probability )
+					g,f = np.random.choice( [(g1,f1),(g2,f2)] )
+					Gs.append( g )
+					distances.append( f )
 				else:
 					break
 				#end if

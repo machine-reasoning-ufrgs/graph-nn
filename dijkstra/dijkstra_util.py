@@ -60,10 +60,46 @@ def reindex_matrix( n, m, M ):
 	return zip( new_index, new_value )
 #end reindex_matrix
 
-def create_graph( g_n, edge_probability, max_multiplier = 2 ):
+def baseline_error( g_n, edge_probability, max_multiplier = 2, factor = 2 ):
 	Gs = None
 	while Gs is None:
-		Gs = _create_graph( g_n, edge_probability, max_multiplier )
+		Gs = _baseline_error( g_n, edge_probability, max_multiplier )
+	#end while
+	return Gs
+#end baseline error
+
+def _baseline_error( g_n, edge_probability, max_multiplier = 2, factor = 2 ):
+	prob = _get_graph( g_n, edge_probability, max_multiplier, factor )
+	if prob is None:
+		return None
+	#end if
+	G1, G2, sa, ta = prob
+	
+	d1 = nx.shortest_path_length( G1, sa, ta, weight="distance" )
+	p1 = nx.shortest_path( G1, sa, ta, weight="distance" )
+	d2 = nx.shortest_path_length( G2, sa, ta, weight="distance" )
+	p2 = nx.shortest_path( G2, sa, ta, weight="distance" )
+	pd1 = nx.shortest_path_length( G1, sa, ta )
+	pd2 = nx.shortest_path_length( G2, sa, ta )
+	if d1 < d2 or p1 == p2:
+		return None
+	#end if
+	e1 = pd1-d1
+	e2 = pd2-d2
+	return {
+		"%abserror": abs(e1)/d1,
+		"%error": e1/d1
+	}, {
+		"%abserror": abs(e2)/d2,
+		"%error": e2/d2
+	}
+#end _baseline_error
+
+
+def create_graph( g_n, edge_probability, max_multiplier = 2, factor = 2 ):
+	Gs = None
+	while Gs is None:
+		Gs = _create_graph( g_n, edge_probability, max_multiplier, factor )
 	#end while
 	return Gs
 #end create_graph
