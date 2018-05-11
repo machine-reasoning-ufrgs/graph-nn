@@ -396,7 +396,7 @@ if __name__ == '__main__':
 		# Restore saved weights
 		if load_checkpoints: load_weights(sess,"./hamiltonian-quiver-checkpoints");
 
-		with open("log-Hamiltonian.dat","w") as logfile:
+		with open("log-Hamiltonian-quiver.dat","w") as logfile:
 			# Run for a number of epochs
 			print( "{timestamp}\t{memory}\tRunning for {} epochs".format( epochs, timestamp = timestamp(), memory = memory_usage() ) )
 			for epoch in range( epochs ):
