@@ -58,7 +58,7 @@ def create(n,d,max_dist):
 	return Ma, W, 0 if solution is None else solution
 #end
 
-def create_dataset(n, path, max_dist=100, min_density=0.5, max_density=0.75, samples=1000):
+def create_dataset(n, path, max_dist=100, min_density=0.125, max_density=0.25, samples=1000):
 
 	if not os.path.exists(path):
 		os.makedirs(path)
