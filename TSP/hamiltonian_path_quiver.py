@@ -335,7 +335,7 @@ def dense_to_quiver( Ma, Mw=None, undirected=True ):
 	Mt_index = []
 	Mw_index = []
 	Mw_value = []
-	e_i = 0
+	e = 0
 	for i in range( Ma.shape[0] ):
 		for j in range( Ma.shape[1] ):
 			if Ma[i,j] != 0:
