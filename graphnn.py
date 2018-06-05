@@ -86,7 +86,7 @@ class GraphNN(object):
 		#end for
 		for m, vp in self.mat.items():
 			v1, v2 = vp
-			if v1 not in self.var or v2 not in self.var:
+			if v1 not in self.var or (v2 not in self.var and type(v2) is not int):
 				raise Exception( "Matrix multiplies from an undeclared variable! mat {m} ~ {v1}, {v2}".format( m = m, v1 = v1, v2 = v2) ) # TODO correct exception type
 			#end if
 		#end for
@@ -121,7 +121,11 @@ class GraphNN(object):
 	def _init_placeholders(self):
 		self.matrix_placeholders = {}
 		for m in self.mat:
-			self.matrix_placeholders[m] = tf.sparse_placeholder( self.float_dtype, shape = [ None, None ], name = m )
+			if type(self.mat[m][1]) == int:
+				self.matrix_placeholders[m] = tf.placeholder( self.float_dtype, shape = [ None, self.mat[m][1] ], name = m )
+			else:
+				self.matrix_placeholders[m] = tf.placeholder( self.float_dtype, shape = [ None, None ], name = m )
+			#end
 		#end for
 		self.time_steps = tf.placeholder( tf.int32, shape = (), name = "time_steps" )
 		return
@@ -165,7 +169,7 @@ class GraphNN(object):
 				self.num_vars[v1] = tf.shape( self.matrix_placeholders[M], name = "{}_n".format( v1 ) )[0]
 			#end if
 			if v2 not in self.num_vars:
-				self.num_vars[v2] = tf.shape( self.matrix_placeholders[M], name = "{}_n".format( v1 ) )[1]
+				self.num_vars[v2] = tf.shape( self.matrix_placeholders[M], name = "{}_n".format( v2 ) )[1]
 			#end if
 		#end for
 		self.pack_vars = {}
@@ -202,16 +206,20 @@ class GraphNN(object):
 		for v1 in self.var:
 			inputs = []
 			for D in self.loop[v1]:
-				# vs ← V ( or [1] )
-				vs = states[D["var"]].h if D["var"] is not None else self.none_ones[ self.mat[ D["mat"] ][1] ]
-				# f_vs ← f(V)
-				f_vs = D["fun"](vs) if D["fun"] is not None else vs
-				# msg_f_vs ← msg(f(V))
-				msg_f_vs = self._tf_msgs[D["msg"]]( f_vs ) if D["msg"] is not None else f_vs
-				# m_msg_f_vs ← M × msg(f(V))
-				m_msg_f_vs = tf.sparse_tensor_dense_matmul( self.matrix_placeholders[ D["mat"] ], msg_f_vs, adjoint_a = D["transpose?"] ) if D["mat"] is not None else msg_f_vs
-				# Finally, append
-				inputs.append( m_msg_f_vs )
+				if D["var"]:
+					# vs ← V
+					vs = states[D["var"]].h
+					# f_vs ← f(V)
+					f_vs = D["fun"](vs) if D["fun"] is not None else vs
+					# msg_f_vs ← msg(f(V))
+					msg_f_vs = self._tf_msgs[D["msg"]]( f_vs ) if D["msg"] is not None else f_vs
+					# m_msg_f_vs ← M × msg(f(V))
+					m_msg_f_vs = tf.matmul( self.matrix_placeholders[ D["mat"] ], msg_f_vs, adjoint_a = D["transpose?"] ) if D["mat"] is not None else msg_f_vs
+					# Finally, append
+					inputs.append( m_msg_f_vs )
+				else:
+					inputs.append(self.matrix_placeholders[ D["mat"] ])
+				#end if
 			#end for
 			v_inputs = tf.concat( inputs, axis = 1 )
 
