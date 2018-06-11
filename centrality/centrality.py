@@ -38,6 +38,7 @@ def build_network(d):
 	GNN = {}
 
 	# Define placeholder for result values (one per problem)
+	instance_degree = tf.placeholder( tf.float32, [ None ], name = "instance_degree" )
 	instance_betweenness = tf.placeholder( tf.float32, [ None ], name = "instance_betweenness" )
 	instance_closeness = tf.placeholder( tf.float32, [ None ], name = "instance_closeness" )
 	instance_eigenvector = tf.placeholder( tf.float32, [ None ], name = "instance_eigenvector" )
@@ -86,12 +87,20 @@ def build_network(d):
 		name="Centrality",
 	)
 
-	# Define L_vote
+	# Define votes
+	degree_MLP = Mlp(
+		layer_sizes = [ d for _ in range(2) ],
+		activations = [ tf.nn.relu for _ in range(2) ],
+		output_size = 1,
+		name = "degree_MLP",
+		name_internal_layers = True,
+		kernel_initializer = tf.contrib.layers.xavier_initializer(),
+		bias_initializer = tf.zeros_initializer()
+	)
 	betweenness_MLP = Mlp(
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
 		output_size = 1,
-		output_activation = tf.nn.sigmoid,
 		name = "betweenness_MLP",
 		name_internal_layers = True,
 		kernel_initializer = tf.contrib.layers.xavier_initializer(),
@@ -101,7 +110,6 @@ def build_network(d):
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
 		output_size = 1,
-		output_activation = tf.nn.sigmoid,
 		name = "closeness_MLP",
 		name_internal_layers = True,
 		kernel_initializer = tf.contrib.layers.xavier_initializer(),
@@ -111,7 +119,6 @@ def build_network(d):
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
 		output_size = 1,
-		output_activation = tf.nn.sigmoid,
 		name = "eigenvector_MLP",
 		name_internal_layers = True,
 		kernel_initializer = tf.contrib.layers.xavier_initializer(),
@@ -125,17 +132,20 @@ def build_network(d):
 
 	# Get the last embeddings
 	N_n = gnn.last_states["N"].h
+	degree_vote = degree_MLP( N_n )
 	betweenness_vote = betweenness_MLP( N_n )
 	closeness_vote = closeness_MLP( N_n )
 	eigenvector_vote = eigenvector_MLP( N_n )
 
 	# Reorganize votes' result to obtain a prediction for each problem instance
-	def _vote_while_cond(i, predicted_betweenness, predicted_closeness, predicted_eigenvector):
+	def _vote_while_cond(i, predicted_degree, predicted_betweenness, predicted_closeness, predicted_eigenvector):
 		return tf.less( i, p )
 	#end _vote_while_cond
 
-	def _vote_while_body(i, predicted_betweenness, predicted_closeness, predicted_eigenvector):
+	def _vote_while_body(i, predicted_degree, predicted_betweenness, predicted_closeness, predicted_eigenvector):
 		# Gather the target nodes for that problem
+		final_node_degree = degree_vote[ instance_target[i] ]
+		problem_predicted_degree = tf.reshape( final_node_degree, shape = [] )
 		final_node_betweenness = betweenness_vote[ instance_target[i] ]
 		problem_predicted_betweenness = tf.reshape( final_node_betweenness, shape = [] )
 		final_node_closeness = closeness_vote[ instance_target[i] ]
@@ -143,30 +153,35 @@ def build_network(d):
 		final_node_eigenvector = eigenvector_vote[ instance_target[i] ]
 		problem_predicted_eigenvector = tf.reshape( final_node_eigenvector, shape = [] )
 		# Update TensorArray
+		predicted_degree = predicted_degree.write( i, problem_predicted_degree )
 		predicted_betweenness = predicted_betweenness.write( i, problem_predicted_betweenness )
 		predicted_closeness = predicted_closeness.write( i, problem_predicted_closeness )
 		predicted_eigenvector = predicted_eigenvector.write( i, problem_predicted_eigenvector )
 		return tf.add( i, tf.constant( 1 ) ), predicted_betweenness, predicted_closeness, predicted_eigenvector
 	#end _vote_while_body
 			
+	predicted_degree = tf.TensorArray( size = p, dtype = tf.float32 )
 	predicted_betweenness = tf.TensorArray( size = p, dtype = tf.float32 )
 	predicted_closeness = tf.TensorArray( size = p, dtype = tf.float32 )
 	predicted_eigenvector = tf.TensorArray( size = p, dtype = tf.float32 )
 	
-	_, predicted_betweenness, predicted_closeness, predicted_eigenvector = tf.while_loop(
+	_, predicted_degree, predicted_betweenness, predicted_closeness, predicted_eigenvector = tf.while_loop(
 		_vote_while_cond,
 		_vote_while_body,
-		[ tf.constant( 0, dtype = tf.int32 ), predicted_betweenness, predicted_closeness, predicted_eigenvector ]
+		[ tf.constant( 0, dtype = tf.int32 ), predicted_degree, predicted_betweenness,predicted_closeness, predicted_eigenvector ]
 	)
 	predicted_betweenness = predicted_betweenness.stack()
+	predicted_degree = predicted_betweenness.stack()
 	predicted_closeness = predicted_closeness.stack()
 	predicted_eigenvector = predicted_eigenvector.stack()
 
 	# Define loss, %error
-	betweenness_predict_costs = tf.losses.mean_squared_error( labels = instance_betweenness, predictions = predicted_betweenness )
-	closeness_predict_costs = tf.losses.mean_squared_error( labels = instance_closeness, predictions = predicted_closeness )
-	eigenvector_predict_costs = tf.losses.mean_squared_error( labels = instance_eigenvector, predictions = predicted_eigenvector )
+	betweenness_predict_costs = tf.losses.huber_loss( labels = instance_betweenness, predictions = predicted_betweenness )
+	degree_predict_costs = tf.losses.huber_loss( labels = instance_degree, predictions = predicted_degree )
+	closeness_predict_costs = tf.losses.huber_loss( labels = instance_closeness, predictions = predicted_closeness )
+	eigenvector_predict_costs = tf.losses.huber_loss( labels = instance_eigenvector, predictions = predicted_eigenvector )
 	betweenness_predict_cost = tf.reduce_mean( betweenness_predict_costs )
+	degree_predict_cost = tf.reduce_mean( degree_predict_costs )
 	closeness_predict_cost = tf.reduce_mean( closeness_predict_costs )
 	eigenvector_predict_cost = tf.reduce_mean( eigenvector_predict_costs )
 	vars_cost = tf.zeros([])
@@ -174,29 +189,34 @@ def build_network(d):
 	for var in tvars:
 		vars_cost = tf.add( vars_cost, tf.nn.l2_loss( var ) )
 	#end for
-	loss = tf.add_n( [ betweenness_predict_cost, closeness_predict_cost, eigenvector_predict_cost, tf.multiply( vars_cost, parameter_l2norm_scaling ) ] )
+	loss = tf.add_n( [ degree_predict_cost, betweenness_predict_cost, closeness_predict_cost, eigenvector_predict_cost, tf.multiply( vars_cost, parameter_l2norm_scaling ) ] )
 	optimizer = tf.train.AdamOptimizer( name = "Adam", learning_rate = learning_rate )
 	grads, _ = tf.clip_by_global_norm( tf.gradients( loss, tvars ), global_norm_gradient_clipping_ratio )
 	train_step = optimizer.apply_gradients( zip( grads, tvars ) )
 	
 	
+	degree_predict_error = percent_error( labels = instance_degree, predictions = predicted_degree )
 	betweenness_predict_error = percent_error( labels = instance_betweenness, predictions = predicted_betweenness )
 	closeness_predict_error = percent_error( labels = instance_closeness, predictions = predicted_closeness )
 	eigenvector_predict_error = percent_error( labels = instance_eigenvector, predictions = predicted_eigenvector )
 	error = tf.reduce_mean( [ betweenness_predict_error, closeness_predict_error, eigenvector_predict_error ] )
 	
 	GNN["gnn"] = gnn
+	GNN["instance_degree"] = instance_degree
 	GNN["instance_betweenness"] = instance_betweenness
 	GNN["instance_closeness"] = instance_closeness
 	GNN["instance_eigenvector"] = instance_eigenvector
 	GNN["instance_target"] = instance_target
+	GNN["predicted_degree"] = predicted_degree
 	GNN["predicted_betweenness"] = predicted_betweenness
 	GNN["predicted_closeness"] = predicted_closeness
 	GNN["predicted_eigenvector"] = predicted_eigenvector
+	GNN["degree_predict_cost"] = degree_predict_cost
 	GNN["betweenness_predict_cost"] = betweenness_predict_cost
 	GNN["closeness_predict_cost"] = closeness_predict_cost
 	GNN["eigenvector_predict_cost"] = eigenvector_predict_cost
 	GNN["error"] = error
+	GNN["degree_predict_error"] = degree_predict_error
 	GNN["betweenness_predict_error"] = betweenness_predict_error
 	GNN["closeness_predict_error"] = closeness_predict_error
 	GNN["eigenvector_predict_error"] = eigenvector_predict_error
@@ -260,17 +280,18 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 		G[s][t]["weight"] = np.random.rand()
 	#end for
 	T = np.random.randint( 0, g_n )
-	betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G )[T] )
-	closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
 	try:
 		eigenvector = crop_to_float32_mantissa_limit( nx.eigenvector_centrality( G )[T] )
 	except nx.exception.PowerIterationFailedConvergence as e:
 		print( e, file = sys.stderr, flush = True )
 		return None
 	#end try
+	betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G, normalized = False )[T] )
+	closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
+	degree = crop_to_float32_mantissa_limit( nx.degree_centrality( G )[T]
 	M_index, M_values = build_M_from_graph( G )
 	M = [M_index,M_values,(g_n,g_n)]
-	return M,T,betweenness,closeness,eigenvector
+	return M,T,degree,betweenness,closeness,eigenvector
 #end _create_graph
 
 def reindex_matrix( n, m, M ):
@@ -349,6 +370,7 @@ if __name__ == '__main__':
 				max_n = 0
 				instances = 0
 				batch = []
+				degree_vals = []
 				betweenness_vals = []
 				closeness_vals = []
 				eigenvector_vals = []
@@ -359,8 +381,9 @@ if __name__ == '__main__':
 						n_acc += g_n
 						instances += 1
 						max_n = max( max_n, g_n )
-						g,t,b,c,e = create_graph( g_n )
+						g,t,d,b,c,e = create_graph( g_n )
 						batch.append( (g,t) )
+						degree_vals.append( d )
 						betweenness_vals.append( b )
 						closeness_vals.append( c )
 						eigenvector_vals.append( e )
@@ -377,6 +400,7 @@ if __name__ == '__main__':
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["M"]: M,
 						GNN["gnn"].time_steps: time_steps,
+						GNN["instance_degree"]: degree_vals,
 						GNN["instance_betweenness"]: betweenness_vals,
 						GNN["instance_closeness"]: closeness_vals,
 						GNN["instance_eigenvector"]: eigenvector_vals,
@@ -450,6 +474,7 @@ if __name__ == '__main__':
 			max_n = 0
 			instances = 0
 			batch = []
+			degree_vals = []
 			betweenness_vals = []
 			closeness_vals = []
 			eigenvector_vals = []
@@ -460,8 +485,9 @@ if __name__ == '__main__':
 					n_acc += g_n
 					instances += 1
 					max_n = max( max_n, g_n )
-					g,t,b,c,e = create_graph( g_n )
+					g,t,d,b,c,e = create_graph( g_n )
 					batch.append( (g,t) )
+					degree_vals.append( d )
 					betweenness_vals.append( b )
 					closeness_vals.append( c )
 					eigenvector_vals.append( e )
@@ -478,6 +504,7 @@ if __name__ == '__main__':
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].time_steps: time_steps,
+					GNN["instance_degree"]: degree_vals,
 					GNN["instance_betweenness"]: betweenness_vals,
 					GNN["instance_closeness"]: closeness_vals,
 					GNN["instance_eigenvector"]: eigenvector_vals,
