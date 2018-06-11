@@ -289,6 +289,11 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 	betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G, normalized = False )[T] )
 	closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
 	degree = crop_to_float32_mantissa_limit( nx.degree_centrality( G )[T]
+	# Remove normalizations
+	degree = degree * ( g_n - 1 )
+	closeness_n = len( nx.node_connected_component(G, T) )
+	closeness = closeness * ( g_n - 1 ) / ( closeness_n - 1 )
+	# Build matrices
 	M_index, M_values = build_M_from_graph( G )
 	M = [M_index,M_values,(g_n,g_n)]
 	return M,T,degree,betweenness,closeness,eigenvector
