@@ -11,16 +11,21 @@ from mlp import Mlp
 #import itertools
 from util import timestamp, memory_usage#, percent_error
 
+# 32-bit floating point number mantissa limit for a number that is close to zero, but still can be added up to 1. (Not the real value, but a decimal approximation )
 FLOAT32_MANTISSA_LIMIT = 0.00000001
-# Alternative:
-#FLOAT32_MANTISSA_LENGTH = 20 # Actually 24, but set to 20 to allow ignore some small numbers.
+# Alternatives:
+# ALT 1
+#FLOAT32_MANTISSA_LENGTH = 20 # Actually 24, but set to 20 to allow ignoring some small numbers.
+# ALT 2
 #FLOAT32_MANTISSA_LIMIT = 1
 #for _ in range( MANTISSA_SIZE ): FLOAT32_MANTISSA_LIMIT /= 2;
 def crop_to_float32_mantissa_limit(n):
+	# Crops a float32 number under the mantissa limit to zero.
 	return n if abs(n) > FLOAT32_MANTISSA_LIMIT else 0
 #end crop_to_float32_mantissa_limit
 
 def percent_error(labels,predictions,dtype=tf.float32):
+	# Calculates percent error, avoiding division-by-zero
 	# Replace any zeroes with ones
 	labels_div = tf.where( tf.equal( labels, 0 ), tf.ones_like( labels, dtype=dtype ), labels )
 	# Get % error
@@ -53,7 +58,8 @@ def calc_eigenvector( G, T, g_n ):
 #end calc_eigenvector
 
 def build_network(d):
-
+	# Builds the model
+	
 	# Hyperparameters
 	learning_rate = 2e-5
 	parameter_l2norm_scaling = 1e-10
@@ -240,6 +246,7 @@ def build_network(d):
 #end build_network
 
 def create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k = 4, smallworld_p = 0.25, powerlaw_cluster_m = 3, powerlaw_cluster_p = 0.1 ):
+	# Tries to create a graph until all of its centralities can be computed
 	Gs = None
 	while Gs is None:
 		Gs = _create_graph( g_n, erdos_renyi_p, powerlaw_gamma, smallworld_k, smallworld_p, powerlaw_cluster_m, powerlaw_cluster_p )
@@ -248,6 +255,7 @@ def create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k = 
 #end create_graph
 
 def build_M_from_graph( G, undirected = True, key = None ):
+	# Build the sparse tensor matrices from a graph
 	getval = lambda a: 1 if key is None else a[key]
 	M_index = []
 	M_values = []
@@ -263,6 +271,7 @@ def build_M_from_graph( G, undirected = True, key = None ):
 #end build_M_from_graph
 
 def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k = 4, smallworld_p = 0.25, powerlaw_cluster_m = 3, powerlaw_cluster_p = 0.1 ):
+	# Tries to create a graph and returns None if it fails at any point.
 	# Create a graph from a random distribution
 	graph_type = np.random.randint( 0, 4 )
 	if graph_type == 0:
@@ -289,10 +298,10 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 			return None
 		#end try
 	#end if
-	# TODO: Add weights to the edges and fill the sparse matrices
 	for s, t in G.edges:
 		G[s][t]["weight"] = np.random.rand()
 	#end for
+	# Define a random target
 	T = np.random.randint( 0, g_n )
 	# Calculate centrality measures
 	try:
@@ -305,12 +314,14 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 	betweenness = calc_betweenness( G, T, g_n )
 	closeness = calc_closeness( G, T, g_n )
 	# Build matrices
-	M_index, M_values = build_M_from_graph( G )
+	# TODO: Get values from the edges
+	M_index, M_values = build_M_from_graph( G, key = "weight" )
 	M = [M_index,M_values,(g_n,g_n)]
 	return M,T,degree,betweenness,closeness,eigenvector
 #end _create_graph
 
 def reindex_matrix( n, m, M ):
+	# Reindex a sparse matrix
 	new_index = []
 	new_value = []
 	for i, v in zip( M[0], M[1] ):
@@ -321,6 +332,7 @@ def reindex_matrix( n, m, M ):
 	return zip( new_index, new_value )
 
 def create_batch(problems):
+	# Create a problem-batch from the problem list passed
 	n = 0
 	m = 0
 	batch_M_index = []
@@ -331,11 +343,13 @@ def create_batch(problems):
 			continue
 		#end if
 		M, t = p
+		# Reindex the matrix to the new indexes
 		for i, v in reindex_matrix( n, n, M ):
 			batch_M_index.append( i )
 			batch_M_value.append( v )
 		#end for
 		targets.append( n + t )
+		# Update n and m
 		n += M[2][0]
 		m += len(M[0])
 	#end for
@@ -393,6 +407,7 @@ if __name__ == '__main__':
 				closeness_vals = []
 				eigenvector_vals = []
 				targets = []
+				# Generate graphs until the batch can't fit another one
 				while True:
 					g_n = np.random.randint( batch_n_size//2, batch_n_size*2 )
 					if n_acc + g_n < batch_n_max:
@@ -409,6 +424,7 @@ if __name__ == '__main__':
 						break
 					#end if
 				#end for
+				# Create the reindexed batch matrix and target-list
 				M, targets = create_batch( batch )
 				n = M[2][0]
 				m = len( M[0] )
