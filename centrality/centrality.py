@@ -9,7 +9,7 @@ from graphnn import GraphNN
 from mlp import Mlp
 # Import tools
 #import itertools
-from util import timestamp, memory_usage, percent_error
+from util import timestamp, memory_usage#, percent_error
 
 FLOAT32_MANTISSA_LIMIT = 0.00000001
 # Alternative:
@@ -27,6 +27,31 @@ def percent_error(labels,predictions,dtype=tf.float32):
 	return tf.reduce_mean( tf.divide( tf.abs( tf.subtract( labels, predictions ) ), labels_div ) )
 #end percent_error
 
+def calc_degree( G, T, g_n ):
+	# Calculates the degree centrality, non-normalized
+	degree = crop_to_float32_mantissa_limit( nx.degree_centrality( G )[T] )
+	degree = degree * ( g_n - 1 )
+	return degree
+#end calc_degree
+
+def calc_betweenness( G, T, g_n ):
+	# Calculates the betweenness centrality, non-normalized
+	return crop_to_float32_mantissa_limit( nx.betweenness_centrality( G, normalized = False )[T] )
+#end calc_betweenness
+
+def calc_closeness( G, T, g_n ):
+	# Calculates the closeness centrality, non-normalized
+	closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
+	closeness_n = len( nx.node_connected_component(G, T) )
+	closeness = closeness * ( g_n - 1 ) / ( closeness_n - 1 )
+	return closeness
+#end calc_closeness
+
+def calc_eigenvector( G, T, g_n ):
+	# Calculates the eigenvector centrality
+	return crop_to_float32_mantissa_limit( nx.eigenvector_centrality( G )[T] )
+#end calc_eigenvector
+
 def build_network(d):
 
 	# Hyperparameters
@@ -43,17 +68,6 @@ def build_network(d):
 	instance_closeness = tf.placeholder( tf.float32, [ None ], name = "instance_closeness" )
 	instance_eigenvector = tf.placeholder( tf.float32, [ None ], name = "instance_eigenvector" )
 	instance_target = tf.placeholder( tf.int32, [ None ], name = "instance_target" )
-
-	# Define INV, a tf function to exchange positive and negative literal embeddings
-	def INV(Lh):
-		l = tf.shape(Lh)[0]
-		n = tf.div(l,tf.constant(2))
-		# Send messages from negated literals to positive ones, and vice-versa
-		Lh_pos = tf.gather( Lh, tf.range( tf.constant( 0 ), n ) )
-		Lh_neg = tf.gather( Lh, tf.range( n, l ) )
-		Lh_inverted = tf.concat( [ Lh_neg, Lh_pos ], axis = 0 )
-		return Lh_inverted
-	#end
 
 	# Define Graph neural network
 	gnn = GraphNN(
@@ -157,7 +171,7 @@ def build_network(d):
 		predicted_betweenness = predicted_betweenness.write( i, problem_predicted_betweenness )
 		predicted_closeness = predicted_closeness.write( i, problem_predicted_closeness )
 		predicted_eigenvector = predicted_eigenvector.write( i, problem_predicted_eigenvector )
-		return tf.add( i, tf.constant( 1 ) ), predicted_betweenness, predicted_closeness, predicted_eigenvector
+		return tf.add( i, tf.constant( 1 ) ), predicted_degree, predicted_betweenness, predicted_closeness, predicted_eigenvector
 	#end _vote_while_body
 			
 	predicted_degree = tf.TensorArray( size = p, dtype = tf.float32 )
@@ -170,16 +184,16 @@ def build_network(d):
 		_vote_while_body,
 		[ tf.constant( 0, dtype = tf.int32 ), predicted_degree, predicted_betweenness,predicted_closeness, predicted_eigenvector ]
 	)
+	predicted_degree = predicted_degree.stack()
 	predicted_betweenness = predicted_betweenness.stack()
-	predicted_degree = predicted_betweenness.stack()
 	predicted_closeness = predicted_closeness.stack()
 	predicted_eigenvector = predicted_eigenvector.stack()
 
 	# Define loss, %error
-	betweenness_predict_costs = tf.losses.huber_loss( labels = instance_betweenness, predictions = predicted_betweenness )
-	degree_predict_costs = tf.losses.huber_loss( labels = instance_degree, predictions = predicted_degree )
-	closeness_predict_costs = tf.losses.huber_loss( labels = instance_closeness, predictions = predicted_closeness )
-	eigenvector_predict_costs = tf.losses.huber_loss( labels = instance_eigenvector, predictions = predicted_eigenvector )
+	betweenness_predict_costs = tf.losses.mean_squared_error( labels = instance_betweenness, predictions = predicted_betweenness )
+	degree_predict_costs = tf.losses.mean_squared_error( labels = instance_degree, predictions = predicted_degree )
+	closeness_predict_costs = tf.losses.mean_squared_error( labels = instance_closeness, predictions = predicted_closeness )
+	eigenvector_predict_costs = tf.losses.mean_squared_error( labels = instance_eigenvector, predictions = predicted_eigenvector )
 	betweenness_predict_cost = tf.reduce_mean( betweenness_predict_costs )
 	degree_predict_cost = tf.reduce_mean( degree_predict_costs )
 	closeness_predict_cost = tf.reduce_mean( closeness_predict_costs )
@@ -280,19 +294,16 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 		G[s][t]["weight"] = np.random.rand()
 	#end for
 	T = np.random.randint( 0, g_n )
+	# Calculate centrality measures
 	try:
-		eigenvector = crop_to_float32_mantissa_limit( nx.eigenvector_centrality( G )[T] )
+		eigenvector = calc_eigenvector( G, T, g_n )
 	except nx.exception.PowerIterationFailedConvergence as e:
 		print( e, file = sys.stderr, flush = True )
 		return None
 	#end try
-	betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G, normalized = False )[T] )
-	closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
-	degree = crop_to_float32_mantissa_limit( nx.degree_centrality( G )[T]
-	# Remove normalizations
-	degree = degree * ( g_n - 1 )
-	closeness_n = len( nx.node_connected_component(G, T) )
-	closeness = closeness * ( g_n - 1 ) / ( closeness_n - 1 )
+	degree = calc_degree( G, T, g_n )
+	betweenness = calc_betweenness( G, T, g_n )
+	closeness = calc_closeness( G, T, g_n )
 	# Build matrices
 	M_index, M_values = build_M_from_graph( G )
 	M = [M_index,M_values,(g_n,g_n)]
@@ -333,18 +344,18 @@ def create_batch(problems):
 #end create_batch
 
 if __name__ == '__main__':
-	d = 64
-	epochs = 100
-	batch_n_max = 4096
-	batches_per_epoch = 32
+	embedding_size = 2#64
+	epochs = 2#100
+	batch_n_max = 512#4096
+	batches_per_epoch = 2#32
 	n_size_min = 16
-	n_size_max = 512
+	n_size_max = 128#512
 	edge_probability = 0.25
 	time_steps = 32
 
 	# Build model
 	print( "{timestamp}\t{memory}\tBuilding model ...".format( timestamp = timestamp(), memory = memory_usage() ) )
-	GNN = build_network(d)
+	GNN = build_network(embedding_size)
 
 	# Disallow GPU use
 	config = tf.ConfigProto( device_count = {"GPU":0})
@@ -359,10 +370,12 @@ if __name__ == '__main__':
 			# Run batches
 			#instance_generator.reset()
 			epoch_loss = 0.0
+			epoch_degc = 0
 			epoch_betc = 0
 			epoch_cloc = 0
 			epoch_eigc = 0
 			epoch_err = 0.0
+			epoch_dege = 0
 			epoch_bete = 0
 			epoch_cloe = 0
 			epoch_eige = 0
@@ -399,9 +412,9 @@ if __name__ == '__main__':
 				M, targets = create_batch( batch )
 				n = M[2][0]
 				m = len( M[0] )
-
-				_, loss, betc, cloc, eigc, err, bete, cloe, eige = sess.run(
-					[ GNN["train_step"], GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
+				
+				_, loss, degc, betc, cloc, eigc, err, dege, bete, cloe, eige = sess.run(
+					[ GNN["train_step"], GNN["loss"], GNN["degree_predict_cost"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["degree_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 					feed_dict = {
 						GNN["gnn"].matrix_placeholders["M"]: M,
 						GNN["gnn"].time_steps: time_steps,
@@ -414,10 +427,12 @@ if __name__ == '__main__':
 				)
 				
 				epoch_loss += loss
+				epoch_degc += degc
 				epoch_betc += betc
 				epoch_cloc += cloc
 				epoch_eigc += eigc
 				epoch_err += err
+				epoch_dege += dege
 				epoch_bete += bete
 				epoch_cloe += cloe
 				epoch_eige += eige
@@ -425,16 +440,18 @@ if __name__ == '__main__':
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},D:{degree_error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = batch_i,
 						loss = loss,
+						degree_cost = degc,
 						betweenness_cost = betc,
 						closeness_cost = cloc,
 						eigenvector_cost = eigc,
 						error = err,
+						degree_error = dege,
 						betweenness_error = bete,
 						closeness_error = cloe,
 						eigenvector_error = eige,
@@ -446,25 +463,29 @@ if __name__ == '__main__':
 				)
 			#end for
 			# Summarize Epoch
-			epoch_loss = epoch_loss / batches_per_epoch
-			epoch_betc = epoch_betc / batches_per_epoch
-			epoch_cloc = epoch_cloc / batches_per_epoch
-			epoch_eigc = epoch_eigc / batches_per_epoch
-			epoch_err = epoch_err / batches_per_epoch
-			epoch_bete = epoch_bete / batches_per_epoch
-			epoch_cloe = epoch_cloe / batches_per_epoch
-			epoch_eige = epoch_eige / batches_per_epoch
+			epoch_loss /= batches_per_epoch
+			epoch_betc /= batches_per_epoch
+			epoch_betc /= batches_per_epoch
+			epoch_cloc /= batches_per_epoch
+			epoch_eigc /= batches_per_epoch
+			epoch_err /= batches_per_epoch
+			epoch_dege /= batches_per_epoch
+			epoch_bete /= batches_per_epoch
+			epoch_cloe /= batches_per_epoch
+			epoch_eige /= batches_per_epoch
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},D:{degree_error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "all",
 					loss = epoch_loss,
+					degree_cost = epoch_degc,
 					betweenness_cost = epoch_betc,
 					closeness_cost = epoch_cloc,
 					eigenvector_cost = epoch_eigc,
 					error = epoch_err,
+					degree_error = epoch_dege,
 					betweenness_error = epoch_bete,
 					closeness_error = epoch_cloe,
 					eigenvector_error = epoch_eige,
@@ -504,8 +525,8 @@ if __name__ == '__main__':
 			test_n = M[2][0]
 			test_m = len( M[0] )
 			
-			test_loss, test_betc, test_cloc, test_eigc, test_err, test_bete, test_cloe, test_eige = sess.run(
-					[ GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
+			test_loss, test_degc, test_betc, test_cloc, test_eigc, test_err, test_dege, test_bete, test_cloe, test_eige = sess.run(
+					[ GNN["loss"], GNN["degree_predict_cost"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["degree_predict_error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: M,
 					GNN["gnn"].time_steps: time_steps,
@@ -517,16 +538,18 @@ if __name__ == '__main__':
 				}
 			)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},D:{degree_error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
 					batch = "rnd",
 					loss = test_loss,
+					degree_cost = test_degc,
 					betweenness_cost = test_betc,
 					closeness_cost = test_cloc,
 					eigenvector_cost = test_eigc,
 					error = test_err,
+					degree_error = test_dege,
 					betweenness_error = test_bete,
 					closeness_error = test_cloe,
 					eigenvector_error = test_eige,
@@ -538,10 +561,12 @@ if __name__ == '__main__':
 			)
 			# Test with real graphs
 			test_loss = 0.0
+			test_degc = 0.0
 			test_betc = 0.0
 			test_cloc = 0.0
 			test_eigc = 0.0
 			test_err = 0.0
+			test_dege = 0.0
 			test_bete = 0.0
 			test_cloe = 0.0
 			test_eige = 0.0
@@ -554,35 +579,39 @@ if __name__ == '__main__':
 					G = nx.convert_node_labels_to_integers(G)
 					g_n = len( G.nodes )
 					T = np.random.randint( 0, g_n )
-					betweenness = crop_to_float32_mantissa_limit( nx.betweenness_centrality( G )[T] )
-					closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
+					degree = calc_degree( G, T, g_n )
+					betweenness = calc_betweenness( G, T, g_n )
+					closeness = calc_closeness( G, T, g_n )
 					try:
-						eigenvector = crop_to_float32_mantissa_limit( nx.eigenvector_centrality( G )[T] )
+						eigenvector = calc_eigenvector( G, T, g_n )
 					except nx.exception.PowerIterationFailedConvergence as e:
 						print( e, file = sys.stderr, flush = True )
 						continue
 					#end try
 					M_i, M_v = build_M_from_graph( G )
 					M = [M_i,M_v,(g_n,g_n)]
-					loss, betc, cloc, eigc, err, bete, cloe, eige = sess.run(
-						[ GNN["loss"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
+					loss, degc, betc, cloc, eigc, err, dege, bete, cloe, eige = sess.run(
+						[ GNN["loss"], GNN["degree_predict_cost"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["degree_predict_error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]: M,
 							GNN["gnn"].time_steps: time_steps,
+							GNN["instance_degree"]: [ degree ],
 							GNN["instance_betweenness"]: [ betweenness ],
 							GNN["instance_closeness"]: [ closeness ],
 							GNN["instance_eigenvector"]: [ eigenvector ],
 							GNN["instance_target"]: [ T ]
 						}
 					)
-					print( f, loss, betc, cloc, eigc, err, bete, cloe, eige, file=sys.stderr )
+					print( f, loss, degc, betc, cloc, eigc, err, dege, bete, cloe, eige, file=sys.stderr )
 					test_n += M[2][0]
 					test_m += len( M[0] )
 					test_loss += loss
+					test_degc += degc
 					test_betc += betc
 					test_cloc += cloc
 					test_eigc += eigc
 					test_err += err
+					test_dege += dege
 					test_bete += bete
 					test_cloe += cloe
 					test_eige += eige
@@ -591,24 +620,28 @@ if __name__ == '__main__':
 			#end for
 			if instances > 0:
 				test_loss /= instances
+				test_degc /= instances
 				test_betc /= instances
 				test_cloc /= instances
 				test_eigc /= instances
 				test_err /= instances
+				test_dege /= instances
 				test_bete /= instances
 				test_cloe /= instances
 				test_eige /= instances
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f},B:{betweenness_cost:.5f},C:{closeness_cost:.5f},E:{eigenvector_cost:.5f}) Error(T:{error:.5f},D:{degree_error:.5f},B:{betweenness_error:.5f},C:{closeness_error:.5f},E:{eigenvector_error:.5f}))".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						batch = "tst",
 						loss = test_loss,
+						degree_cost = test_degc,
 						betweenness_cost = test_betc,
 						closeness_cost = test_cloc,
 						eigenvector_cost = test_eigc,
 						error = test_err,
+						degree_error = test_dege,
 						betweenness_error = test_bete,
 						closeness_error = test_cloe,
 						eigenvector_error = test_eige,
