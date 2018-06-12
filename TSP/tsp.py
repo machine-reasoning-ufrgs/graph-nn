@@ -42,11 +42,15 @@ def solve(Ma, W):
 
 	assignment = routing.Solve()
 
-	if assignment is None:
-		return None
-	else:
-		return assignment.ObjectiveValue()
+	def route_generator():
+		index = 0
+		for i in range(n):
+			yield index
+			index = assignment.Value(routing.NextVar(index))
+		#end
 	#end
+
+	return list(route_generator()) if assignment is not None else []
 #end
 
 def create(n,d,max_dist):	
@@ -55,7 +59,7 @@ def create(n,d,max_dist):
 
 	solution = solve(Ma,W)
 
-	return Ma, W, 0 if solution is None else solution
+	return Ma, W, (0 if solution is None else solution)
 #end
 
 def create_dataset(n, path, max_dist=100, min_density=0.125, max_density=0.25, samples=1000):
@@ -93,8 +97,8 @@ def build_network(d):
 			"Msrc": ("E","V"),
 			# Mtgt is a E×v adjacency matrix connecting each edge to its target vertex
 			"Mtgt": ("E","V"),
-			# W is a diagonal matrix of shape |E|×|E| where W[i,i] is the weight of the i-th edge
-			"W": ("E","E")
+			# W is a column matrix of shape |E|×1 where W[i,1] is the weight of the i-th edge
+			"W": ("E",1)
 		},
 		{
 			# Vmsg computes messages from vertices to edges
@@ -136,7 +140,7 @@ def build_network(d):
 		name="TSP"
 	)
 
-	# Define E_vote
+	# Define E_vote, which will compute one logit for each edge
 	E_vote_MLP = Mlp(
 		layer_sizes = [ d for _ in range(2) ],
 		activations = [ tf.nn.relu for _ in range(2) ],
@@ -147,8 +151,11 @@ def build_network(d):
 		bias_initializer = tf.zeros_initializer()
 		)
 
-	# Define placeholder for result values (one per problem)
-	labels = tf.placeholder( tf.float32, [ None ], name = "labels" )
+	# Define placeholder for routes' edges (a mask of edges per problem)
+	route_edges = tf.placeholder( tf.float32, [ None ], name = "route_edges" )
+
+	# Define placeholder for routes' costs (one per problem)
+	cost = tf.placeholder( tf.float32, [ None ], name = "cost" )
 
 	# Placeholders for the list of number of vertices and edges per instance
 	n_vertices 	= tf.placeholder( tf.int32, shape = (None,), name = "n_vertices" )
@@ -157,7 +164,7 @@ def build_network(d):
 	# Compute the number of variables
 	n = tf.shape( gnn.matrix_placeholders["Msrc"] )[1]
 	# Compute number of problems
-	p = tf.shape( labels )[0]
+	p = tf.shape( cost )[0]
 
 	# Get the last embeddings
 	E_n = gnn.last_states["E"].h
@@ -166,69 +173,129 @@ def build_network(d):
 	# Compute a probability pᵢ ∈ [0,1] that each edge belongs to the TSP optimal route
 	E_prob = tf.sigmoid(E_vote)
 
-	# Compute a cost for each edge by multiplying each weight with the corresponding edge probability
-	cost_per_edge = tf.sparse_tensor_dense_matmul(gnn.matrix_placeholders["W"],E_prob)
+	"""
+		Compute a 'fuzzy' cost for each edge by multiplying each edge weight
+		with the corresponding edge probability
+	"""
+	cost_per_edge_fuzzy = tf.multiply(gnn.matrix_placeholders["W"], E_prob)
+
+	"""
+		Compute a 'binary' cost for each edge. Edges whose probabilities fall
+		below 50% have their weights zeroed while edges whose probabilities
+		fall above 50% have their weights unaltered
+	"""
+	cost_per_edge_binary = tf.multiply(gnn.matrix_placeholders["W"], tf.round(E_prob))
 
 	# Reorganize votes' result to obtain a prediction for each problem instance
-	def _vote_while_cond(i, n_acc, predictions):
+	def _vote_while_cond(i, n_acc, cost_predictions_fuzzy, cost_predictions_binary):
 		return tf.less( i, p )
 	#end _vote_while_cond
 
-	def _vote_while_body(i, n_acc, predictions):
+	def _vote_while_body(i, n_acc, cost_predictions_fuzzy, cost_predictions_binary):
 		
 		# Gather the set of edge costs relative to the i-th problem
-		costs_i = tf.gather(cost_per_edge, tf.range(n_acc, tf.add(n_acc, n_edges[i])))
+		costs_fuzzy_i 	= tf.gather(cost_per_edge_fuzzy,	tf.range(n_acc, tf.add(n_acc, n_edges[i])))
+		costs_binary_i 	= tf.gather(cost_per_edge_binary,	tf.range(n_acc, tf.add(n_acc, n_edges[i])))
 
 		# The total TSP cost for this problem is the sum of all its costs
-		problem_prediction = tf.reduce_sum(costs_i)
+		problem_cost_prediction_fuzzy	= tf.reduce_sum(costs_fuzzy_i)
+		problem_cost_prediction_binary	= tf.reduce_sum(costs_binary_i)
 
 		# Update TensorArray
-		predictions = predictions.write( i, problem_prediction )
-		return tf.add(i, tf.constant(1)), tf.add(n_acc, n_edges[i]), predictions
+		cost_predictions_fuzzy	= cost_predictions_fuzzy.write( i, problem_cost_prediction_fuzzy )
+		cost_predictions_binary	= cost_predictions_binary.write( i, problem_cost_prediction_binary )
+		return tf.add(i, tf.constant(1)), tf.add(n_acc, n_edges[i]), cost_predictions_fuzzy, cost_predictions_binary
 	#end _vote_while_body
 	
 	# Obtain a list of predictions, one per problem
-	predictions = tf.TensorArray( size = p, dtype = tf.float32 )
-	_, _, predictions = tf.while_loop(
+	cost_predictions_fuzzy 	= tf.TensorArray( size = p, dtype = tf.float32 )
+	cost_predictions_binary = tf.TensorArray( size = p, dtype = tf.float32 )
+	_, _, cost_predictions_fuzzy, cost_predictions_binary = tf.while_loop(
 		_vote_while_cond,
 		_vote_while_body,
-		[ tf.constant(0), tf.constant(0), predictions ]
+		[ tf.constant(0), tf.constant(0), cost_predictions_fuzzy, cost_predictions_binary ]
 	)
-	predictions = predictions.stack()
+	cost_predictions_fuzzy 	= cost_predictions_fuzzy.stack()
+	cost_predictions_binary = cost_predictions_binary.stack()
 
-	# Define loss, optimizer, train step
-	predict_costs 	= tf.losses.mean_squared_error(labels,predictions)
-	predict_cost 	= tf.reduce_mean(predict_costs)
+	# Define losses, accuracies, optimizer, train step
+	
+	# Define cost loss, which is the mean squared error between the 'fuzzy'
+	# route cost computed from edge probabilities and the cost label
+	cost_loss = tf.reduce_mean(tf.losses.mean_squared_error(cost,cost_predictions_fuzzy))
+
+	# Define edges loss, which is the binary cross entropy between the
+	# computed edge probabilities and the edge (binary) labels, reduced among
+	# all instances
+	edges_loss = tf.losses.sigmoid_cross_entropy(
+			multi_class_labels = route_edges,
+			logits = tf.reshape(E_vote, [-1])
+			#weights = 
+			)
+
+	# Define cost accuracy, which is the deviation between the 'binary' route
+	# cost computed from the binarized edge probabilities and the cost label
+	cost_acc = tf.reduce_mean(
+		tf.div(
+			tf.subtract(cost_predictions_binary, cost),
+			tf.add(cost, tf.constant(10**(-5)))
+			)
+		)
+
+	# Define edges accuracy, which is the proportion of correctly guessed edges
+	edges_acc = tf.reduce_mean(
+		tf.div(
+			tf.reduce_sum(
+				tf.multiply(
+					route_edges,
+					tf.cast(
+						tf.equal(
+							route_edges,
+							tf.reshape(E_prob, [-1])
+							),
+						tf.float32
+						)
+					)
+				),
+				tf.maximum(tf.reduce_sum(route_edges), tf.constant(1.0))
+			)
+		)
+	
 	vars_cost 		= tf.zeros([])
 	tvars 			= tf.trainable_variables()
 	for var in tvars:
 		vars_cost = tf.add( vars_cost, tf.nn.l2_loss( var ) )
 	#end for
-	loss 		= tf.add( predict_cost, tf.multiply( vars_cost, parameter_l2norm_scaling ) )
+	
+	loss 		= tf.add( edges_loss, tf.multiply( vars_cost, parameter_l2norm_scaling ) )
+	
 	optimizer 	= tf.train.AdamOptimizer( name = "Adam", learning_rate = learning_rate )
 	grads, _ 	= tf.clip_by_global_norm( tf.gradients( loss, tvars ), global_norm_gradient_clipping_ratio )
 	train_step 	= optimizer.apply_gradients( zip( grads, tvars ) )
-
-	# Define accuracy
-	acc = tf.reduce_mean(tf.div(tf.subtract(predictions, labels), labels))
-	modacc = tf.reduce_mean(tf.div(tf.abs(tf.subtract(predictions, labels)), labels))
+	
 
 	GNN["gnn"] 						= gnn
 	GNN["n_vertices"]				= n_vertices
 	GNN["n_edges"]					= n_edges
-	GNN["labels"] 					= labels
-	GNN["predictions"] 				= predictions
-	GNN["avg_pred"]					= tf.reduce_mean(predictions)
+	GNN["cost"] 					= cost
+	GNN["route_edges"]				= route_edges
+	GNN["cost_predictions_fuzzy"] 	= cost_predictions_fuzzy
+	GNN["cost_predictions_binary"] 	= cost_predictions_binary
+	GNN["avg_cost_fuzzy"]			= tf.reduce_mean(cost_predictions_fuzzy)
+	GNN["avg_cost_binary"]			= tf.reduce_mean(cost_predictions_binary)
+	GNN["cost_loss"]				= cost_loss
+	GNN["edges_loss"]				= edges_loss
+	GNN["cost_acc"]					= cost_acc
+	GNN["edges_acc"]				= edges_acc
 	GNN["loss"] 					= loss
-	GNN["acc"]						= acc
-	GNN["modacc"] = modacc
 	GNN["train_step"] 				= train_step
+	GNN["E_prob"]					= E_prob
 	return GNN
 #end
 
 if __name__ == '__main__':
 	
-	create_datasets 	= True
+	create_datasets 	= False
 	load_checkpoints	= False
 	save_checkpoints	= True
 
@@ -236,7 +303,7 @@ if __name__ == '__main__':
 	epochs 				= 1000
 	batch_size			= 32
 	batches_per_epoch 	= 128
-	time_steps 			= 40
+	time_steps 			= 32
 
 	if create_datasets:
 		samples = batch_size*batches_per_epoch
@@ -272,54 +339,53 @@ if __name__ == '__main__':
 
 				# Reset train loader
 				train_loader.reset()
-				e_loss_train, e_acc_train, e_modacc_train, e_pred_train = 0, 0, 0, 0
+				e_loss_train, e_acc_train, e_pred_train = 0, 0, 0
 				for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), batches_per_epoch):
 
 					# Get features, problem sizes, labels
-					Ma_all, W_all, n_vertices, n_edges, solution = batch
+					Ma_all, W_all, n_vertices, n_edges, route_edges, cost = batch
 
 					total_vertices 	= sum(n_vertices)
 					total_edges		= sum(n_edges)
 
 					Msrc 	= np.zeros((total_edges,total_vertices))
 					Mtgt 	= np.zeros((total_edges,total_vertices))
-					W 		= np.zeros((total_edges,total_edges))
+					W 		= np.zeros((total_edges,1))
 
 					for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma_all)[0]), list(np.nonzero(Ma_all)[1]))):
 						Msrc[e] = i
 						Mtgt[e] = j
-						W[e,e] = W_all[i,j]
+						W[e,0] = W_all[i,j]
 					#end
 
 					# Run one SGD iteration
-					_, loss, acc, modacc, pred = sess.run(
-						[ GNN["train_step"], GNN["loss"], GNN["acc"], GNN["modacc"], GNN["avg_pred"] ],
+					_, loss, acc, pred, E_prob = sess.run(
+						[ GNN["train_step"], GNN["loss"], GNN["edges_acc"], GNN["avg_cost_binary"], GNN["E_prob"] ],
 						feed_dict = {
-							GNN["gnn"].matrix_placeholders["Msrc"]:	dense_to_sparse(Msrc),
-							GNN["gnn"].matrix_placeholders["Mtgt"]:	dense_to_sparse(Mtgt),
-							GNN["gnn"].matrix_placeholders["W"]:	dense_to_sparse(W),
+							GNN["gnn"].matrix_placeholders["Msrc"]:	Msrc,
+							GNN["gnn"].matrix_placeholders["Mtgt"]:	Mtgt,
+							GNN["gnn"].matrix_placeholders["W"]:	W,
 							GNN["n_vertices"]:						n_vertices,
 							GNN["n_edges"]:							n_edges,
 							GNN["gnn"].time_steps: 					time_steps,
-							GNN["labels"]: 							solution
+							GNN["route_edges"]:						route_edges,
+							GNN["cost"]: 							cost,
 						}
 					)
 
-					e_loss_train += loss
-					e_acc_train += acc
-					e_modacc_train += modacc
-					e_pred_train += pred
+					e_loss_train 	+= loss
+					e_acc_train 	+= acc
+					e_pred_train 	+= pred
 
 					# Print batch summary
 					print(
-						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,%Err|%Err|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
+						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Acc,Avg.Pred): ({loss:.3f},{acc:.3f},{pred:.3f})".format(
 							timestamp = timestamp(),
 							memory = memory_usage(),
 							epoch = epoch,
 							batch = batch_i,
 							loss = loss,
 							acc = acc,
-							modacc = modacc,
 							pred = pred,
 							n = total_vertices,
 							m = total_edges,
@@ -328,19 +394,17 @@ if __name__ == '__main__':
 						flush = True
 					)
 				#end
-				e_loss_train /= batches_per_epoch
-				e_acc_train /= batches_per_epoch
-				e_modacc_train /= batches_per_epoch
-				e_pred_train /= batches_per_epoch
+				e_loss_train 	/= batches_per_epoch
+				e_acc_train 	/= batches_per_epoch
+				e_pred_train 	/= batches_per_epoch
 				# Print train epoch summary
 				print(
-					"{timestamp}\t{memory}\tTrain Epoch {epoch}\tMain (Loss,%Err|%Err|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
+					"{timestamp}\t{memory}\tTrain Epoch {epoch}\tMain (Loss,Acc,Avg.Pred): ({loss:.3f},{acc:.3f},{pred:.3f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						loss = e_loss_train,
 						acc = e_acc_train,
-						modacc = e_modacc_train,
 						pred = e_pred_train
 					),
 					flush = True
@@ -351,71 +415,66 @@ if __name__ == '__main__':
 				# Reset test loader
 				print("{timestamp}\t{memory}\tTesting...".format(timestamp=timestamp(), memory=memory_usage()))
 				test_loader.reset()
-				e_loss_test, e_acc_test, e_modacc_test, e_pred_test = 0, 0, 0, 0
+				e_loss_test, e_acc_test, e_pred_test = 0, 0, 0
 				for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), batches_per_epoch):
 
 					# Get features, problem sizes, labels
-					Ma_all, W_all, n_vertices, n_edges, solution = batch
+					Ma_all, W_all, n_vertices, n_edges, route_edges, cost = batch
 
 					total_vertices 	= sum(n_vertices)
 					total_edges		= sum(n_edges)
 
 					Msrc 	= np.zeros((total_edges,total_vertices))
 					Mtgt 	= np.zeros((total_edges,total_vertices))
-					W 		= np.zeros((total_edges,total_edges))
+					W 		= np.zeros((total_edges,1))
 
 					for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma_all)[0]), list(np.nonzero(Ma_all)[1]))):
 						Msrc[e] = i
 						Mtgt[e] = j
-						W[e,e] = W_all[i,j]
+						W[e,0] = W_all[i,j]
 					#end
 
-					# Run one SGD iteration
-					loss, acc, modacc, pred = sess.run(
-						[ GNN["loss"], GNN["acc"], GNN["modacc"], GNN["avg_pred"] ],
+					loss, acc, pred = sess.run(
+						[ GNN["loss"], GNN["edges_acc"], GNN["avg_cost_binary"] ],
 						feed_dict = {
-							GNN["gnn"].matrix_placeholders["Msrc"]:	dense_to_sparse(Msrc),
-							GNN["gnn"].matrix_placeholders["Mtgt"]:	dense_to_sparse(Mtgt),
-							GNN["gnn"].matrix_placeholders["W"]:	dense_to_sparse(W),
-							GNN["n_vertices"]: n_vertices,
-							GNN["n_edges"]: n_edges,
-							GNN["gnn"].time_steps: time_steps,
-							GNN["labels"]: solution
+							GNN["gnn"].matrix_placeholders["Msrc"]:	Msrc,
+							GNN["gnn"].matrix_placeholders["Mtgt"]:	Mtgt,
+							GNN["gnn"].matrix_placeholders["W"]:	W,
+							GNN["n_vertices"]:						n_vertices,
+							GNN["n_edges"]:							n_edges,
+							GNN["gnn"].time_steps: 					time_steps,
+							GNN["route_edges"]:						route_edges,
+							GNN["cost"]: 							cost,
 						}
 					)
 
-					e_loss_test += loss
-					e_acc_test += acc
-					e_modacc_test += modacc
-					e_pred_test += pred
+					e_loss_test 	+= loss
+					e_acc_test 		+= acc
+					e_pred_test 	+= pred
 				#end
-				e_loss_test /= batches_per_epoch
-				e_acc_test /= batches_per_epoch
-				e_modacc_test /= batches_per_epoch
-				e_pred_test /= batches_per_epoch
+				e_loss_test 	/= batches_per_epoch
+				e_acc_test 		/= batches_per_epoch
+				e_pred_test 	/= batches_per_epoch
 				# Print test epoch summary
 				print(
-					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,%Err|%Err|,Avg.Pred): ({loss:.5f},{acc:.5f}|{modacc:.5f}|,{pred:.3f})".format(
+					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,%Err|%Err|,Avg.Pred): ({loss:.3f},\t{acc:.3f},\t{pred:.3f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
 						loss = e_loss_test,
 						acc = e_acc_test,
-						modacc = e_modacc_test,
 						pred = e_pred_test
 					),
 					flush = True
 				)
 
 				# Write train and test results into log file
-				logfile.write("{epoch} {loss_train} {acc_train} {modacc_train} {loss_test} {acc_test} {modacc_test}\n".format(
+				logfile.write("{epoch} {loss_train} {acc_train} {loss_test} {acc_test}\n".format(
 					epoch = epoch,
 					loss_train = e_loss_train,
 					acc_train = e_acc_train,
-					modacc_train = e_modacc_train,
 					loss_test = e_loss_test,
-					acc_test = e_acc_test,
-					modacc_test = e_modacc_test
+					acc_test = e_acc_test
 					)
 				)
 				logfile.flush()
