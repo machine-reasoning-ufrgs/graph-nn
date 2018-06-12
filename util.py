@@ -12,6 +12,17 @@ def memory_usage():
 	return "{} {}".format( s[-2], s[-1] )
 #end memory_usage
 
+def sparse_to_dense( M_sparse, default = 0.0 ):
+	M_i, M_v, M_shape = M_sparse
+	n, m = M_shape
+	M = np.ones( (n, m), dtype = np.float32 ) * default
+	for indexes, value in zip( M_i, M_v ):
+		i,j = indexes
+		M[i,j] = value
+	#end for
+	return M
+#end sparse_to_dense
+
 def dense_to_sparse( M, check = lambda x: x != 0, val = lambda x: x ):
 	n, m = M.shape
 	M_i = []

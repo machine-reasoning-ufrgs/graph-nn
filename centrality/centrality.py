@@ -9,7 +9,7 @@ from graphnn import GraphNN
 from mlp import Mlp
 # Import tools
 #import itertools
-from util import timestamp, memory_usage#, percent_error
+from util import timestamp, memory_usage, sparse_to_dense#, percent_error
 
 # 32-bit floating point number mantissa limit for a number that is close to zero, but still can be added up to 1. (Not the real value, but a decimal approximation )
 FLOAT32_MANTISSA_LIMIT = 0.00000001
@@ -358,12 +358,12 @@ def create_batch(problems):
 #end create_batch
 
 if __name__ == '__main__':
-	embedding_size = 2#64
-	epochs = 2#100
-	batch_n_max = 512#4096
-	batches_per_epoch = 2#32
+	embedding_size = 64
+	epochs = 100
+	batch_n_max = 4096
+	batches_per_epoch = 32
 	n_size_min = 16
-	n_size_max = 128#512
+	n_size_max = 512
 	edge_probability = 0.25
 	time_steps = 32
 
@@ -432,7 +432,7 @@ if __name__ == '__main__':
 				_, loss, degc, betc, cloc, eigc, err, dege, bete, cloe, eige = sess.run(
 					[ GNN["train_step"], GNN["loss"], GNN["degree_predict_cost"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["betweenness_predict_error"], GNN["degree_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 					feed_dict = {
-						GNN["gnn"].matrix_placeholders["M"]: M,
+						GNN["gnn"].matrix_placeholders["M"]: sparse_to_dense( M ),
 						GNN["gnn"].time_steps: time_steps,
 						GNN["instance_degree"]: degree_vals,
 						GNN["instance_betweenness"]: betweenness_vals,
@@ -544,7 +544,7 @@ if __name__ == '__main__':
 			test_loss, test_degc, test_betc, test_cloc, test_eigc, test_err, test_dege, test_bete, test_cloe, test_eige = sess.run(
 					[ GNN["loss"], GNN["degree_predict_cost"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["degree_predict_error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 				feed_dict = {
-					GNN["gnn"].matrix_placeholders["M"]: M,
+					GNN["gnn"].matrix_placeholders["M"]: sparse_to_dense( M ),
 					GNN["gnn"].time_steps: time_steps,
 					GNN["instance_degree"]: degree_vals,
 					GNN["instance_betweenness"]: betweenness_vals,
@@ -609,7 +609,7 @@ if __name__ == '__main__':
 					loss, degc, betc, cloc, eigc, err, dege, bete, cloe, eige = sess.run(
 						[ GNN["loss"], GNN["degree_predict_cost"], GNN["betweenness_predict_cost"], GNN["closeness_predict_cost"], GNN["eigenvector_predict_cost"], GNN["error"], GNN["degree_predict_error"], GNN["betweenness_predict_error"], GNN["closeness_predict_error"], GNN["eigenvector_predict_error"] ],
 						feed_dict = {
-							GNN["gnn"].matrix_placeholders["M"]: M,
+							GNN["gnn"].matrix_placeholders["M"]: sparse_to_dense( M ),
 							GNN["gnn"].time_steps: time_steps,
 							GNN["instance_degree"]: [ degree ],
 							GNN["instance_betweenness"]: [ betweenness ],
