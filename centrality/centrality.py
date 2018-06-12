@@ -48,7 +48,16 @@ def calc_closeness( G, T, g_n ):
 	# Calculates the closeness centrality, non-normalized
 	closeness = crop_to_float32_mantissa_limit( nx.closeness_centrality( G, T ) )
 	closeness_n = len( nx.node_connected_component(G, T) )
-	closeness = closeness * ( g_n - 1 ) / ( closeness_n - 1 )
+	if closeness_n < 1:
+		print(
+			"Node {T} not connected to any other! Closeness centrality: {closeness}".format(
+				T = T,
+				closeness = closeness
+			)
+		)
+	else:
+		closeness = closeness * ( g_n - 1 ) / ( closeness_n - 1 )
+	#end if
 	return closeness
 #end calc_closeness
 
