@@ -181,7 +181,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.round(E_prob)
+						tf.round(tf.reshape(E_prob, [-1]))
 						),
 					tf.float32
 					)
@@ -198,7 +198,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.round(E_prob)
+						tf.round(tf.reshape(E_prob, [-1]))
 						),
 					tf.float32
 					)
@@ -208,7 +208,7 @@ def build_network(d):
 	)
 
 	# Define edges accuracy as the arithmetic mean of pos_edges_acc and neg_edges_acc
-	edges_acc = pos_edges_acc # tf.reduce_mean([pos_edges_acc, neg_edges_acc])
+	edges_acc = tf.reduce_mean([pos_edges_acc, neg_edges_acc])
 	
 	vars_cost 		= tf.zeros([])
 	tvars 			= tf.trainable_variables()
@@ -226,7 +226,6 @@ def build_network(d):
 	optimizer 			= tf.train.AdamOptimizer( name = "Adam", learning_rate = learning_rate )
 	grads, _ 			= tf.clip_by_global_norm( tf.gradients( tf.add( edges_loss, tf.multiply( vars_cost, parameter_l2norm_scaling ) ), tvars ), global_norm_gradient_clipping_ratio )
 	edges_train_step 	= optimizer.apply_gradients( zip( grads, tvars ) )
-	
 
 	GNN["gnn"] 						= gnn
 	GNN["n_vertices"]				= n_vertices
