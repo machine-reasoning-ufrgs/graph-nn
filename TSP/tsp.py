@@ -208,7 +208,7 @@ def build_network(d):
 	)
 
 	# Define edges accuracy as the arithmetic mean of pos_edges_acc and neg_edges_acc
-	edges_acc = tf.reduce_mean([pos_edges_acc, neg_edges_acc])
+	edges_acc = pos_edges_acc # tf.reduce_mean([pos_edges_acc, neg_edges_acc])
 	
 	vars_cost 		= tf.zeros([])
 	tvars 			= tf.trainable_variables()
