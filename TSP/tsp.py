@@ -3,77 +3,13 @@ import tensorflow as tf
 import numpy as np
 import random
 from itertools import islice
-from ortools.constraint_solver import pywrapcp
-from ortools.constraint_solver import routing_enums_pb2
 # Add the parent folder path to the sys.path list for importing
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 # Import model builder
 from graphnn import GraphNN
 from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
-from tsp_utils import InstanceLoader, write_graph, read_graph
-
-def solve(Ma, W):
-	"""
-		Find the optimal TSP tour given vertex adjacencies given by the binary
-		matrix Ma and edge weights given by the real-valued matrix W
-	"""
-
-	n = Ma.shape[0]
-
-	# Create a routing model
-	routing = pywrapcp.RoutingModel(n, 1, 0)
-
-	def dist(i,j):
-		return W[i,j]
-	#end
-
-	# Define edge weights
-	routing.SetArcCostEvaluatorOfAllVehicles(dist)
-
-	# Remove connections where Ma[i,j] = 0
-	for i in range(n):
-		for j in range(n):
-			if Ma[i,j] == 0:
-				routing.NextVar(i).RemoveValue(j)
-			#end
-		#end
-	#end
-
-	assignment = routing.Solve()
-
-	def route_generator():
-		index = 0
-		for i in range(n):
-			yield index
-			index = assignment.Value(routing.NextVar(index))
-		#end
-	#end
-
-	return list(route_generator()) if assignment is not None else []
-#end
-
-def create(n,d,max_dist):	
-	Ma = (np.random.rand(n,n) < d).astype(int)
-	W = (np.random.randint(1,max_dist,(n,n)))
-
-	solution = solve(Ma,W)
-
-	return Ma, W, (0 if solution is None else solution)
-#end
-
-def create_dataset(n, path, max_dist=100, min_density=0.125, max_density=0.25, samples=1000):
-
-	if not os.path.exists(path):
-		os.makedirs(path)
-	#end if
-
-	for i,d in enumerate(np.linspace(min_density,max_density,samples)):
-		Ma,W,solution = create(n,d,max_dist)
-		print("Writing graph file n,m=({},{})".format(Ma.shape[0], len(np.nonzero(Ma)[0])))
-		write_graph(Ma,W,solution,"{}/{}.graph".format(path,i))
-	#end
-#end
+from tsp_utils import InstanceLoader, create_dataset_metric, create_dataset_random
 
 def build_network(d):
 	# Hyperparameters
@@ -93,42 +29,31 @@ def build_network(d):
 			"E": d
 		},
 		{
-			# Msrc is a E×v adjacency matrix connecting each edge to its source vertex
-			"Msrc": ("E","V"),
-			# Mtgt is a E×v adjacency matrix connecting each edge to its target vertex
-			"Mtgt": ("E","V"),
+			# M is a E×V adjacency matrix connecting each edge to the vertices it's connected to
+			"M": ("E","V"),
 			# W is a column matrix of shape |E|×1 where W[i,1] is the weight of the i-th edge
 			"W": ("E",1)
 		},
 		{
-			# Vmsg computes messages from vertices to edges
+			# Vmsg is a MLP which computes messages from vertex embeddings to edge embeddings
 			"Vmsg": ("V","E"),
-			# Emsg computes messages from edges to vertices
+			# Emsg is a MLP which computes messages from edge embeddings to vertex embeddings
 			"Emsg": ("E","V")
 		},
 		{
-			# V(t+1) ← Vu( Msrcᵀ × Emsg(E(t)), Mtgtᵀ × Emsg(E(t)) )
+			# V(t+1) ← Vu( Mᵀ × Emsg(E(t)) )
 			"V": [
 				{
-					"mat": "Msrc",
-					"transpose?": True,
-					"var": "E"
-				},
-				{
-					"mat": "Mtgt",
+					"mat": "M",
+					"msg": "Emsg",
 					"transpose?": True,
 					"var": "E"
 				}
 			],
-			# C(t+1) ← Cu( Msrc × Vmsg(V(t)), Mtgt × Vmsg(V(t)), W × ones(|E|))
+			# E(t+1) ← Eu( M × Vmsg(V(t)), W )
 			"E": [
 				{
-					"mat": "Msrc",
-					"msg": "Vmsg",
-					"var": "V"
-				},
-				{
-					"mat": "Mtgt",
+					"mat": "M",
 					"msg": "Vmsg",
 					"var": "V"
 				},
@@ -161,8 +86,8 @@ def build_network(d):
 	n_vertices 	= tf.placeholder( tf.int32, shape = (None,), name = "n_vertices" )
 	n_edges 	= tf.placeholder( tf.int32, shape = (None,), name = "edges" )
 
-	# Compute the number of variables
-	n = tf.shape( gnn.matrix_placeholders["Msrc"] )[1]
+	# Compute the number of vertices
+	n = tf.shape( gnn.matrix_placeholders["M"] )[1]
 	# Compute number of problems
 	p = tf.shape( cost )[0]
 
@@ -222,15 +147,22 @@ def build_network(d):
 	
 	# Define cost loss, which is the mean squared error between the 'fuzzy'
 	# route cost computed from edge probabilities and the cost label
-	cost_loss = tf.reduce_mean(tf.losses.mean_squared_error(cost,cost_predictions_fuzzy))
+	#cost_loss = tf.losses.mean_squared_error(cost,cost_predictions_fuzzy)
+	cost_loss = tf.losses.mean_squared_error(tf.reduce_sum(cost), tf.reduce_sum(cost_per_edge_binary))
 
 	# Define edges loss, which is the binary cross entropy between the
 	# computed edge probabilities and the edge (binary) labels, reduced among
 	# all instances
+	solution_edges 		= tf.cast(tf.reduce_sum(route_edges), tf.float32)
+	total_edges 		= tf.cast(tf.shape(route_edges)[0], tf.float32)
+	not_solution_edges	= tf.subtract(total_edges,solution_edges)
 	edges_loss = tf.losses.sigmoid_cross_entropy(
 			multi_class_labels = route_edges,
-			logits = tf.reshape(E_vote, [-1])
-			#weights = 
+			logits = tf.reshape(E_vote, [-1]),
+			weights = tf.add(
+				tf.scalar_mul(tf.divide(solution_edges,total_edges), 		route_edges),
+				tf.scalar_mul(tf.divide(not_solution_edges,total_edges), 	tf.subtract(tf.ones((tf.cast(total_edges, tf.int32),)), route_edges))
+				)
 			)
 
 	# Define cost accuracy, which is the deviation between the 'binary' route
@@ -267,7 +199,7 @@ def build_network(d):
 		vars_cost = tf.add( vars_cost, tf.nn.l2_loss( var ) )
 	#end for
 	
-	loss 		= tf.add( edges_loss, tf.multiply( vars_cost, parameter_l2norm_scaling ) )
+	loss 		= tf.add( cost_loss, tf.multiply( vars_cost, parameter_l2norm_scaling ) )
 	
 	optimizer 	= tf.train.AdamOptimizer( name = "Adam", learning_rate = learning_rate )
 	grads, _ 	= tf.clip_by_global_norm( tf.gradients( loss, tvars ), global_norm_gradient_clipping_ratio )
@@ -306,11 +238,12 @@ if __name__ == '__main__':
 	time_steps 			= 32
 
 	if create_datasets:
+		n = 20
 		samples = batch_size*batches_per_epoch
 		print("Creating {} train instances...".format(samples))
-		create_dataset(20, path="TSP-train", samples=samples)
+		create_dataset_random(n, path="TSP-train", samples=samples)
 		print("Creating {} test instances...".format(samples))
-		create_dataset(20, path="TSP-test", samples=samples)
+		create_dataset_random(n, path="TSP-test", samples=samples)
 	#end
 
 	# Build model
@@ -348,22 +281,19 @@ if __name__ == '__main__':
 					total_vertices 	= sum(n_vertices)
 					total_edges		= sum(n_edges)
 
-					Msrc 	= np.zeros((total_edges,total_vertices))
-					Mtgt 	= np.zeros((total_edges,total_vertices))
-					W 		= np.zeros((total_edges,1))
+					M 	= np.zeros((total_edges,total_vertices))
+					W 	= np.zeros((total_edges,1))
 
 					for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma_all)[0]), list(np.nonzero(Ma_all)[1]))):
-						Msrc[e] = i
-						Mtgt[e] = j
+						M[e,i] = 1
 						W[e,0] = W_all[i,j]
 					#end
 
 					# Run one SGD iteration
 					_, loss, acc, pred, E_prob = sess.run(
-						[ GNN["train_step"], GNN["loss"], GNN["edges_acc"], GNN["avg_cost_binary"], GNN["E_prob"] ],
+						[ GNN["train_step"], GNN["loss"], GNN["cost_acc"], GNN["avg_cost_binary"], GNN["E_prob"] ],
 						feed_dict = {
-							GNN["gnn"].matrix_placeholders["Msrc"]:	Msrc,
-							GNN["gnn"].matrix_placeholders["Mtgt"]:	Mtgt,
+							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
 							GNN["n_vertices"]:						n_vertices,
 							GNN["n_edges"]:							n_edges,
@@ -435,7 +365,7 @@ if __name__ == '__main__':
 					#end
 
 					loss, acc, pred = sess.run(
-						[ GNN["loss"], GNN["edges_acc"], GNN["avg_cost_binary"] ],
+						[ GNN["loss"], GNN["cost_acc"], GNN["avg_cost_binary"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["Msrc"]:	Msrc,
 							GNN["gnn"].matrix_placeholders["Mtgt"]:	Mtgt,
@@ -457,7 +387,7 @@ if __name__ == '__main__':
 				e_pred_test 	/= batches_per_epoch
 				# Print test epoch summary
 				print(
-					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,%Err|%Err|,Avg.Pred): ({loss:.3f},\t{acc:.3f},\t{pred:.3f})".format(
+					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,Acc,Avg.Pred): ({loss:.3f},\t{acc:.3f},\t{pred:.3f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
