@@ -227,7 +227,7 @@ def build_network(d):
 
 if __name__ == '__main__':
 	
-	create_datasets 	= False
+	create_datasets 	= True
 	load_checkpoints	= False
 	save_checkpoints	= True
 
@@ -241,9 +241,9 @@ if __name__ == '__main__':
 		n = 20
 		samples = batch_size*batches_per_epoch
 		print("Creating {} train instances...".format(samples))
-		create_dataset_random(n, path="TSP-train", samples=samples)
+		create_dataset_metric(n, path="TSP-train", samples=samples)
 		print("Creating {} test instances...".format(samples))
-		create_dataset_random(n, path="TSP-test", samples=samples)
+		create_dataset_metric(n, path="TSP-test", samples=samples)
 	#end
 
 	# Build model
@@ -286,6 +286,7 @@ if __name__ == '__main__':
 
 					for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma_all)[0]), list(np.nonzero(Ma_all)[1]))):
 						M[e,i] = 1
+						M[e,j] = 1
 						W[e,0] = W_all[i,j]
 					#end
 
@@ -354,21 +355,19 @@ if __name__ == '__main__':
 					total_vertices 	= sum(n_vertices)
 					total_edges		= sum(n_edges)
 
-					Msrc 	= np.zeros((total_edges,total_vertices))
-					Mtgt 	= np.zeros((total_edges,total_vertices))
+					M 	= np.zeros((total_edges,total_vertices))
 					W 		= np.zeros((total_edges,1))
 
 					for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma_all)[0]), list(np.nonzero(Ma_all)[1]))):
-						Msrc[e] = i
-						Mtgt[e] = j
+						M[e,i] = 1
+						M[e,j] = 1
 						W[e,0] = W_all[i,j]
 					#end
 
 					loss, acc, pred = sess.run(
 						[ GNN["loss"], GNN["cost_acc"], GNN["avg_cost_binary"] ],
 						feed_dict = {
-							GNN["gnn"].matrix_placeholders["Msrc"]:	Msrc,
-							GNN["gnn"].matrix_placeholders["Mtgt"]:	Mtgt,
+							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
 							GNN["n_vertices"]:						n_vertices,
 							GNN["n_edges"]:							n_edges,

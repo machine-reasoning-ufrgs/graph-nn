@@ -413,7 +413,7 @@ def read_graph(filepath):
 	return Ma,Mw,route
 #end
 
-def create_dataset_random(n, path, max_dist=2, min_density=0.25, max_density=0.25, samples=1000):
+def create_dataset_random(n, path, max_dist=2, min_density=0.5, max_density=0.5, samples=1000):
 
 	if not os.path.exists(path):
 		os.makedirs(path)
@@ -423,9 +423,6 @@ def create_dataset_random(n, path, max_dist=2, min_density=0.25, max_density=0.2
 		Ma,W,solution = create_graph_random(n,d,max_dist)
 		print("Writing graph file n,m=({},{})".format(Ma.shape[0], len(np.nonzero(Ma)[0])))
 		write_graph(Ma,(1.0/max_dist)*W,solution,"{}/{}.graph".format(path,i))
-		if len(solution) > 0:
-			count_solvable += 1
-		#end
 	#end
 #end
 
