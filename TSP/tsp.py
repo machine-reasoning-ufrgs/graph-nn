@@ -168,8 +168,13 @@ def build_network(d):
 		multi_class_labels	= route_edges,
 		logits 				= E_vote,
 		weights 			= tf.add(
-			tf.scalar_mul(tf.divide(tf.add(pos_edges_n,neg_edges_n),pos_edges_n), route_edges),
-			tf.scalar_mul(tf.divide(tf.add(pos_edges_n,neg_edges_n),neg_edges_n), tf.subtract(tf.ones_like(route_edges), route_edges))
+			tf.scalar_mul(
+				tf.divide(tf.add(pos_edges_n,neg_edges_n),pos_edges_n),
+				route_edges),
+			tf.scalar_mul(
+				tf.divide(tf.add(pos_edges_n,neg_edges_n),neg_edges_n),
+				tf.subtract(tf.ones_like(route_edges), route_edges)
+				)
 			)
 		)
 
@@ -181,7 +186,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.ones_like(route_edges)#tf.round(E_prob)
+						tf.round(E_prob)
 						),
 					tf.float32
 					)
@@ -198,7 +203,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.ones_like(route_edges)#tf.round(E_prob)
+						tf.round(E_prob)
 						),
 					tf.float32
 					)
@@ -247,6 +252,7 @@ def build_network(d):
 	GNN["cost_train_step"] 			= cost_train_step
 	GNN["edges_train_step"] 		= edges_train_step
 	GNN["E_prob"]					= E_prob
+	GNN["aux"] 						= tf.equal(route_edges,tf.round(E_prob))
 	return GNN
 #end
 
@@ -322,8 +328,8 @@ if __name__ == '__main__':
 					#end
 
 					# Run one SGD iteration
-					_, loss, pacc, nacc, acc = sess.run(
-						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)] ],
+					aux, _, loss, pacc, nacc, acc = sess.run(
+						[ GNN["aux"], GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -334,6 +340,8 @@ if __name__ == '__main__':
 							GNN["route_cost"]: 						route_cost,
 						}
 					)
+
+					print(aux)
 
 					# Update epoch train loss and epoch train accuracy
 					e_loss_train 	+= loss
