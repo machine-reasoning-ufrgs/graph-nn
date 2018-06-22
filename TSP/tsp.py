@@ -252,7 +252,30 @@ def build_network(d):
 	GNN["cost_train_step"] 			= cost_train_step
 	GNN["edges_train_step"] 		= edges_train_step
 	GNN["E_prob"]					= E_prob
-	GNN["aux"] 						= tf.equal(route_edges,tf.round(E_prob))
+
+	pos_aux = tf.multiply(
+				route_edges,
+				tf.cast(
+					tf.equal(
+						route_edges,
+						tf.round(E_prob)
+						),
+					tf.float32
+					)
+			)
+
+	neg_aux = tf.multiply(
+				tf.subtract(tf.ones_like(route_edges), route_edges),
+				tf.cast(
+					tf.equal(
+						route_edges,
+						tf.round(E_prob)
+						),
+					tf.float32
+					)
+			)
+
+	GNN["aux"] 						= tf.Print(tf.equal(route_edges,tf.round(E_prob)), [tf.shape(pos_aux), tf.shape(neg_aux)])
 	return GNN
 #end
 
