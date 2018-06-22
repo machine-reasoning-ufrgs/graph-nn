@@ -185,7 +185,7 @@ def build_network(d):
 		)
 
 	# Define edges loss as the sum of pos_edges_loss and neg_edges_loss
-	edges_loss = tf.reduce_sum([pos_edges_loss, neg_edges_loss])
+	edges_loss = tf.add(tf.reduce_mean(pos_edges_loss), tf.reduce_mean(neg_edges_loss))
 
 	# Compute the proportion of correctly guessed edges that DO appear in the solution
 	pos_edges_acc = tf.divide(
