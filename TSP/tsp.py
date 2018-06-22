@@ -187,7 +187,7 @@ def build_network(d):
 					)
 			)
 		),
-		tf.reduce_sum(route_edges)
+		pos_edges_n
 	)
 
 	# Compute the proportion of correctly guessed edges that DO NOT appear in the solution
@@ -204,7 +204,7 @@ def build_network(d):
 					)
 			)
 		),
-		tf.reduce_sum(tf.subtract(tf.ones_like(route_edges), route_edges))
+		neg_edges_n
 	)
 
 	# Define edges accuracy as the arithmetic mean of pos_edges_acc and neg_edges_acc
@@ -239,6 +239,8 @@ def build_network(d):
 	GNN["cost_loss"]				= cost_loss
 	GNN["edges_loss"]				= edges_loss
 	GNN["cost_acc"]					= cost_acc
+	GNN["pos_edges_acc"]			= pos_edges_acc
+	GNN["neg_edges_acc"]			= neg_edges_acc
 	GNN["edges_acc"]				= edges_acc
 	GNN["cost_loss"] 				= cost_loss
 	GNN["edges_loss"] 				= edges_loss
@@ -320,8 +322,8 @@ if __name__ == '__main__':
 					#end
 
 					# Run one SGD iteration
-					_, loss, acc = sess.run(
-						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["{}_acc".format(loss_type)] ],
+					_, loss, pacc, nacc, acc = sess.run(
+						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -339,12 +341,14 @@ if __name__ == '__main__':
 
 					# Print batch summary
 					print(
-						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,Acc): ({loss:.3f},{acc:.3f})".format(
+						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,+Acc,-Acc,Acc): ({loss:.3f},{pacc:.3f},{nacc:.3f},{acc:.3f})".format(
 							timestamp 	= timestamp(),
 							memory 		= memory_usage(),
 							epoch 		= epoch,
 							batch 		= batch_i,
 							loss 		= loss,
+							pacc 		= pacc,
+							nacc 		= nacc,
 							acc 		= acc,
 							n 			= total_vertices,
 							m 			= total_edges,
