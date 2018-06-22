@@ -162,7 +162,7 @@ def build_network(d):
 	# Count the number of edges that appear in the solution
 	pos_edges_n = tf.reduce_sum(route_edges)
 	# Count the number of edges that do not appear in the solution
-	neg_edges_n = tf.reduce_sum(tf.subtract(tf.ones_like(route_edges),route_edges))
+	neg_edges_n = tf.reduce_sum(tf.subtract(tf.ones_like(route_edges), route_edges))
 	# Compute edges loss
 	edges_loss = tf.losses.sigmoid_cross_entropy(
 		multi_class_labels	= route_edges,
@@ -181,7 +181,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.round(E_prob)
+						tf.ones_like(route_edges)#tf.round(E_prob)
 						),
 					tf.float32
 					)
@@ -198,7 +198,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.round(E_prob)
+						tf.ones_like(route_edges)#tf.round(E_prob)
 						),
 					tf.float32
 					)
