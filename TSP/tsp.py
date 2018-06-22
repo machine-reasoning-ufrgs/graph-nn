@@ -328,7 +328,7 @@ if __name__ == '__main__':
 
 					# Run one SGD iteration
 					_, loss, pacc, nacc, acc, e_prob = sess.run(
-						[ GNN["aux"], GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)], GNN["E_prob"] ],
+						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)], GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -344,7 +344,7 @@ if __name__ == '__main__':
 					misses 	= np.sum((np.round(e_prob) != route_edges).astype(int))
 					total 	= hits+misses
 
-					print("Hits: {}/{} | Misses: {}/{}".format(hits,misses,hits+misses))
+					print("Hits: {}/{} | Misses: {}/{}".format(hits,total,misses,total))
 					print("Avg. edge prob: {}".format(np.mean(e_prob)))
 
 					# Update epoch train loss and epoch train accuracy
