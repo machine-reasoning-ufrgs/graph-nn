@@ -159,6 +159,12 @@ def build_network(d):
 		)
 
 	# Compute a 'positive' loss relative to the edges that DO appear in the solution
+	"""
+		logits is prepared as: route_edges .* E_vote
+		such that:
+			logits[i] = 0 when route_edges[i] = 0 and
+			logits[i] = E_vote[i] when route_edges[i] = 1
+	"""
 	pos_edges_loss = tf.losses.sigmoid_cross_entropy(
 		multi_class_labels	= route_edges,
 		logits 				= tf.multiply(route_edges, tf.reshape(E_vote, [-1]))
@@ -174,7 +180,7 @@ def build_network(d):
 	neg_edges_loss = tf.losses.sigmoid_cross_entropy(
 		multi_class_labels	= route_edges,
 		logits 				= tf.add(
-			tf.route_edges,
+			route_edges,
 			tf.multiply(tf.subtract(tf.ones_like(route_edges), route_edges), tf.reshape(E_vote, [-1]))
 			)
 		)
