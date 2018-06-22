@@ -93,7 +93,7 @@ def build_network(d):
 
 	# Get the last embeddings
 	E_n = gnn.last_states["E"].h
-	E_vote = E_vote_MLP( E_n )
+	E_vote = tf.reshape(E_vote_MLP(E_n), [-1])
 
 	# Compute a probability pᵢ ∈ [0,1] that each edge belongs to the TSP optimal route
 	E_prob = tf.sigmoid(E_vote)
@@ -158,6 +158,8 @@ def build_network(d):
 			)
 		)
 
+	tf.where()
+
 	# Compute a 'positive' loss relative to the edges that DO appear in the solution
 	"""
 		logits is prepared as: route_edges .* E_vote
@@ -166,8 +168,8 @@ def build_network(d):
 			logits[i] = E_vote[i] when route_edges[i] = 1
 	"""
 	pos_edges_loss = tf.losses.sigmoid_cross_entropy(
-		multi_class_labels	= route_edges,
-		logits 				= tf.multiply(route_edges, tf.reshape(E_vote, [-1]))
+		multi_class_labels	= tf.gather(route_edges,	route_edges),
+		logits 				= tf.gather(E_vote, 		route_edges)
 		)
 
 	# Compute a 'negative' loss relative to the edges that DO NOT appear in the solution
@@ -178,11 +180,8 @@ def build_network(d):
 			logits[i] = 1 when route_edges[i] = 1
 	"""
 	neg_edges_loss = tf.losses.sigmoid_cross_entropy(
-		multi_class_labels	= route_edges,
-		logits 				= tf.add(
-			route_edges,
-			tf.multiply(tf.subtract(tf.ones_like(route_edges), route_edges), tf.reshape(E_vote, [-1]))
-			)
+		multi_class_labels	= tf.gather(route_edges,	tf.subtract(tf.ones_like(route_edges),route_edges)),
+		logits 				= tf.gather(E_vote, 		tf.subtract(tf.ones_like(route_edges),route_edges))
 		)
 
 	# Define edges loss as the sum of pos_edges_loss and neg_edges_loss
@@ -196,7 +195,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.round(tf.reshape(E_prob, [-1]))
+						tf.round(E_prob)
 						),
 					tf.float32
 					)
@@ -213,7 +212,7 @@ def build_network(d):
 				tf.cast(
 					tf.equal(
 						route_edges,
-						tf.round(tf.reshape(E_prob, [-1]))
+						tf.round(E_prob)
 						),
 					tf.float32
 					)
