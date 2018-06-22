@@ -159,15 +159,41 @@ def build_network(d):
 		)
 
 	# Compute a 'positive' loss relative to the edges that DO appear in the solution
+	"""
+		we want to enforce that:
+			∘ logits[i] = E_vote[i] iff route_edges[i] == 1 else -∞
+
+		this can be implemented as:
+			∘ logits = (1-route_edges) × (-∞) + (route_edges) × E_vote 
+	"""
 	pos_edges_loss = tf.losses.sigmoid_cross_entropy(
-		multi_class_labels	= tf.gather(route_edges,	route_edges),
-		logits 				= tf.gather(E_vote, 		route_edges)
+		multi_class_labels	= route_edges,
+		logits 				= tf.add(
+			tf.multiply(
+				tf.subtract(tf.ones_like(route_edges), route_edges),
+				tf.scalar_mul(-np.inf, tf.ones_like(route_edges))
+				),
+				tf.multiply(route_edges, E_vote)
+			)
 		)
 
 	# Compute a 'negative' loss relative to the edges that DO NOT appear in the solution
+	"""
+		we want to enforce that:
+			∘ logits[i] = E_vote[i] iff route_edges[i] == 0 else +∞
+
+		this can be implemented as:
+			∘ logits = (route_edges) × (∞) + (1-route_edges) × E_vote 
+	"""
 	neg_edges_loss = tf.losses.sigmoid_cross_entropy(
-		multi_class_labels	= tf.gather(route_edges,	tf.subtract(tf.ones_like(route_edges),route_edges)),
-		logits 				= tf.gather(E_vote, 		tf.subtract(tf.ones_like(route_edges),route_edges))
+		multi_class_labels	= route_edges,
+		logits 				= tf.add(
+			tf.multiply(
+				route_edges,
+				tf.scalar_mul(np.inf, tf.ones_like(route_edges))
+				),
+				tf.multiply(tf.subtract(tf.ones_like(route_edges),route_edges), E_vote)
+			)
 		)
 
 	# Define edges loss as the sum of pos_edges_loss and neg_edges_loss
