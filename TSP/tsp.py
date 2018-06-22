@@ -340,12 +340,11 @@ if __name__ == '__main__':
 						}
 					)
 
-					hits 	= np.sum((np.round(e_prob) == route_edges).astype(int))
-					misses 	= np.sum((np.round(e_prob) != route_edges).astype(int))
-					total 	= hits+misses
-
-					print("Hits: {}/{} | Misses: {}/{}".format(hits,total,misses,total))
-					print("Avg. edge prob: {}".format(np.mean(e_prob)))
+					#hits 	= np.sum((np.round(e_prob) == route_edges).astype(int))
+					#misses 	= np.sum((np.round(e_prob) != route_edges).astype(int))
+					#total 	= hits+misses
+					#print("Hits: {}/{} | Misses: {}/{}".format(hits,total,misses,total))
+					#print("Avg. edge prob: {}".format(np.mean(e_prob)))
 
 					# Update epoch train loss and epoch train accuracy
 					e_loss_train 	+= loss
