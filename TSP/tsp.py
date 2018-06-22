@@ -253,29 +253,7 @@ def build_network(d):
 	GNN["edges_train_step"] 		= edges_train_step
 	GNN["E_prob"]					= E_prob
 
-	pos_aux = tf.multiply(
-				route_edges,
-				tf.cast(
-					tf.equal(
-						route_edges,
-						tf.round(E_prob)
-						),
-					tf.float32
-					)
-			)
-
-	neg_aux = tf.multiply(
-				tf.subtract(tf.ones_like(route_edges), route_edges),
-				tf.cast(
-					tf.equal(
-						route_edges,
-						tf.round(E_prob)
-						),
-					tf.float32
-					)
-			)
-
-	GNN["aux"] 						= tf.Print(tf.equal(route_edges,tf.round(E_prob)), [tf.shape(pos_aux), tf.shape(neg_aux)])
+	GNN["aux"] = tf.equal(route_edges,tf.round(E_prob))
 	return GNN
 #end
 
@@ -364,8 +342,6 @@ if __name__ == '__main__':
 						}
 					)
 
-					print(aux)
-
 					# Update epoch train loss and epoch train accuracy
 					e_loss_train 	+= loss
 					e_acc_train 	+= acc
@@ -388,6 +364,8 @@ if __name__ == '__main__':
 						flush = True
 					)
 				#end
+
+				print("Hits: {}/{} | Misses: {}/{}".format(np.sum(aux.astype(int)), np.sum(1-aux.astype(int)), aux.shape[0]))
 				
 				# Normalize epoch train loss and epoch train accuracy
 				e_loss_train 	/= batches_per_epoch
