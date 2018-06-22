@@ -252,8 +252,6 @@ def build_network(d):
 	GNN["cost_train_step"] 			= cost_train_step
 	GNN["edges_train_step"] 		= edges_train_step
 	GNN["E_prob"]					= E_prob
-
-	GNN["aux"] = tf.equal(route_edges,tf.round(E_prob))
 	return GNN
 #end
 
@@ -329,8 +327,8 @@ if __name__ == '__main__':
 					#end
 
 					# Run one SGD iteration
-					aux, _, loss, pacc, nacc, acc = sess.run(
-						[ GNN["aux"], GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)] ],
+					_, loss, pacc, nacc, acc, e_prob = sess.run(
+						[ GNN["aux"], GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)], GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -341,6 +339,13 @@ if __name__ == '__main__':
 							GNN["route_cost"]: 						route_cost,
 						}
 					)
+
+					hits 	= np.sum((np.round(e_prob) == route_edges).astype(int))
+					misses 	= np.sum((np.round(e_prob) != route_edges).astype(int))
+					total 	= hits+misses
+
+					print("Hits: {}/{} | Misses: {}/{}".format(hits,misses,hits+misses))
+					print("Avg. edge prob: {}".format(np.mean(e_prob)))
 
 					# Update epoch train loss and epoch train accuracy
 					e_loss_train 	+= loss
@@ -364,8 +369,6 @@ if __name__ == '__main__':
 						flush = True
 					)
 				#end
-
-				print("Hits: {}/{} | Misses: {}/{}".format(np.sum(aux.astype(int)), np.sum(1-aux.astype(int)), aux.shape[0]))
 				
 				# Normalize epoch train loss and epoch train accuracy
 				e_loss_train 	/= batches_per_epoch
