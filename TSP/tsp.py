@@ -162,30 +162,15 @@ def build_network(d):
 	# Count the number of edges that appear in the solution
 	pos_edges_n = tf.reduce_sum(route_edges)
 	# Count the number of edges that do not appear in the solution
-	neg_edges_n = tf.reduce_sum(tf.subtract(tf.ones_like(1),route_edges))
+	neg_edges_n = tf.reduce_sum(tf.subtract(tf.ones_like(1.0),route_edges))
 	# Compute edges loss
 	edges_loss = tf.losses.sigmoid_cross_entropy(
 		multi_class_labels	= route_edges,
 		logits 				= E_vote,
 		weights 			= tf.add(
-			tf.scalar_mul(tf.divide(1.0,pos_edges_n), route_edges),
-			tf.scalar_mul(tf.divide(1.0,neg_edges_n), tf.subtract(tf.ones_like(route_edges), route_edges))
+			tf.scalar_mul(tf.divide(tf.add(pos_edges_n,neg_edges_n),pos_edges_n), route_edges),
+			tf.scalar_mul(tf.divide(tf.add(pos_edges_n,neg_edges_n),neg_edges_n), tf.subtract(tf.ones_like(route_edges), route_edges))
 			)
-		)
-
-	# Compute a 'negative' loss relative to the edges that DO NOT appear in the solution
-	neg_edges_loss = tf.losses.sigmoid_cross_entropy(
-		multi_class_labels	= route_edges,
-		logits 				= E_vote,
-		weights 			= tf.subtract(tf.ones_like(route_edges),route_edges)
-		)
-
-	# Define edges loss as the weighted sum of pos_edges_loss and neg_edges_loss
-	# Specifically: loss = pos/#('positive' edges) + neg/#('negative' edges)
-	pos_edges_n = tf.reduce_sum(route_edges)
-	edges_loss = tf.add(
-		tf.divide(pos_edges_loss, pos_edges_n),
-		tf.divide(neg_edges_loss, tf.subtract(1.0,pos_edges_n))
 		)
 
 	# Compute the proportion of correctly guessed edges that DO appear in the solution
