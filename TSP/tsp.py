@@ -9,7 +9,7 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from graphnn import GraphNN
 from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
-from tsp_utils import InstanceLoader, create_dataset_metric, create_dataset_random
+from tsp_utils import InstanceLoader, create_dataset_metric, to_quiver
 
 def build_network(d):
 	# Hyperparameters
@@ -259,7 +259,7 @@ if __name__ == '__main__':
 	
 	create_datasets 	= False
 	load_checkpoints	= False
-	save_checkpoints	= True
+	save_checkpoints	= False
 
 	d 					= 128
 	epochs 				= 1000
@@ -305,26 +305,16 @@ if __name__ == '__main__':
 				train_loader.reset()
 
 				# Init epoch train loss and epoch train accuracy
-				e_loss_train, e_acc_train = 0, 0
+				e_loss_train, e_pacc_train, e_nacc_train, e_acc_train = 0, 0, 0, 0
 
 				# Run batches
 				for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), batches_per_epoch):
 
 					# Get features, problem sizes, labels for this batch
-					Ma_all, W_all, n_vertices, n_edges, route_edges, route_cost = batch
+					Ma_all, Mw_all, n_vertices, n_edges, route_edges, route_cost = batch
 
-					# Compute total number of vertices and edges
-					total_vertices 	= sum(n_vertices)
-					total_edges		= sum(n_edges)
-
-					# Define matrices M and W
-					M 	= np.zeros((total_edges,total_vertices))
-					W 	= np.zeros((total_edges,1))
-					for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma_all)[0]), list(np.nonzero(Ma_all)[1]))):
-						M[e,i] = 1
-						M[e,j] = 1
-						W[e,0] = W_all[i,j]
-					#end
+					# Convert to quiver format
+					M, W = to_quiver(Ma_all, Mw_all)
 
 					# Run one SGD iteration
 					_, loss, pacc, nacc, acc, e_prob = sess.run(
@@ -340,19 +330,15 @@ if __name__ == '__main__':
 						}
 					)
 
-					#hits 	= np.sum((np.round(e_prob) == route_edges).astype(int))
-					#misses 	= np.sum((np.round(e_prob) != route_edges).astype(int))
-					#total 	= hits+misses
-					#print("Hits: {}/{} | Misses: {}/{}".format(hits,total,misses,total))
-					#print("Avg. edge prob: {}".format(np.mean(e_prob)))
-
 					# Update epoch train loss and epoch train accuracy
 					e_loss_train 	+= loss
+					e_pacc_train	+= pacc
+					e_nacc_train 	+= nacc
 					e_acc_train 	+= acc
 
 					# Print batch summary
 					print(
-						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,instances): ({n},{m},{i})\t| (Loss,+Acc,-Acc,Acc): ({loss:.3f},{pacc:.3f},{nacc:.3f},{acc:.3f})".format(
+						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,batch size): ({n},{m},{batch_size}) | (Loss,+Acc,-Acc,Acc): ({loss:.3f},{pacc:.3f},{nacc:.3f},{acc:.3f}) | (Avg.,Std.) E_Prob: ({avg_eprob:.3f},{std_eprob:.3f})".format(
 							timestamp 	= timestamp(),
 							memory 		= memory_usage(),
 							epoch 		= epoch,
@@ -361,9 +347,11 @@ if __name__ == '__main__':
 							pacc 		= pacc,
 							nacc 		= nacc,
 							acc 		= acc,
-							n 			= total_vertices,
-							m 			= total_edges,
-							i 			= batch_size
+							n 			= sum(n_vertices),
+							m 			= sum(n_edges),
+							batch_size 	= batch_size,
+							avg_eprob	= np.mean(e_prob),
+							std_eprob	= np.std(e_prob)
 						),
 						flush = True
 					)
@@ -371,6 +359,8 @@ if __name__ == '__main__':
 				
 				# Normalize epoch train loss and epoch train accuracy
 				e_loss_train 	/= batches_per_epoch
+				e_pacc_train 	/= batches_per_epoch
+				e_nacc_train 	/= batches_per_epoch
 				e_acc_train 	/= batches_per_epoch
 				
 				# Print train epoch summary
@@ -394,29 +384,20 @@ if __name__ == '__main__':
 				test_loader.reset()
 				
 				# Init epoch test loss and epoch test accuracy
-				e_loss_test, e_acc_test = 0, 0
+				e_loss_test, e_pacc_test, e_nacc_test, e_acc_test = 0, 0, 0, 0
 
 				# Run batches
 				for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), batches_per_epoch):
 
 					# Get features, problem sizes, labels for this batch
-					Ma_all, W_all, n_vertices, n_edges, route_edges, route_cost = batch
+					Ma_all, Mw_all, n_vertices, n_edges, route_edges, route_cost = batch
 
-					# Compute total number of vertices and edges
-					total_vertices 	= sum(n_vertices)
-					total_edges		= sum(n_edges)
+					# Convert to quiver format
+					M, W = to_quiver(Ma_all, Mw_all)
 
-					# Define matrices M and W
-					M 	= np.zeros((total_edges,total_vertices))
-					W 	= np.zeros((total_edges,1))
-					for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma_all)[0]), list(np.nonzero(Ma_all)[1]))):
-						M[e,i] = 1
-						M[e,j] = 1
-						W[e,0] = W_all[i,j]
-					#end
-
-					loss, acc = sess.run(
-						[ GNN["{}_loss".format(loss_type)], GNN["{}_acc".format(loss_type)] ],
+					# Run one SGD iteration
+					loss, pacc, nacc, acc, e_prob = sess.run(
+						[ GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)], GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -430,11 +411,15 @@ if __name__ == '__main__':
 
 					# Update epoch test loss and epoch test accuracy
 					e_loss_test += loss
+					e_pacc_test	+= pacc
+					e_nacc_test	+= nacc
 					e_acc_test 	+= acc
 				#end
 
 				# Normalize epoch test loss and epoch test accuracy
 				e_loss_test /= batches_per_epoch
+				e_pacc_test	/= batches_per_epoch
+				e_nacc_test	/= batches_per_epoch
 				e_acc_test 	/= batches_per_epoch
 				
 				# Print test epoch summary
@@ -450,11 +435,15 @@ if __name__ == '__main__':
 				)
 
 				# Write train and test results into log file
-				logfile.write("{epoch} {loss_train} {acc_train} {loss_test} {acc_test}\n".format(
+				logfile.write("{epoch} {loss_train} {pacc_train} {nacc_train} {acc_train} {loss_test} {acc_test} {pacc_test} {nacc_test}\n".format(
 					epoch 		= epoch,
 					loss_train 	= e_loss_train,
+					pacc_train 	= e_pacc_train,
+					nacc_train 	= e_nacc_train,
 					acc_train 	= e_acc_train,
 					loss_test 	= e_loss_test,
+					pacc_test 	= e_pacc_test,
+					nacc_test 	= e_nacc_test,
 					acc_test 	= e_acc_test
 					)
 				)
