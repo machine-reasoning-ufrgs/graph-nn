@@ -100,66 +100,21 @@ def build_network(d):
 	# Compute a probability pᵢ ∈ [0,1] that each edge belongs to the TSP optimal route
 	E_prob = tf.sigmoid(E_vote)
 
-	"""
-		Compute a 'fuzzy' cost for each edge by multiplying each edge weight
-		with the corresponding edge probability
-	"""
-	cost_per_edge_fuzzy = tf.multiply(gnn.matrix_placeholders["W"], E_prob)
-
-	"""
-		Compute a 'binary' cost for each edge. Edges whose probabilities fall
-		below 50% have their weights zeroed while edges whose probabilities
-		fall above 50% have their weights unaltered
-	"""
-	cost_per_edge_binary = tf.multiply(gnn.matrix_placeholders["W"], tf.round(E_prob))
-
-	# Reorganize votes' result to obtain a prediction for each problem instance
-	def _vote_while_cond(i, n_acc, cost_predictions_fuzzy, cost_predictions_binary):
-		return tf.less( i, p )
-	#end _vote_while_cond
-
-	def _vote_while_body(i, n_acc, cost_predictions_fuzzy, cost_predictions_binary):
-		
-		# Gather the set of edge costs relative to the i-th problem
-		costs_fuzzy_i 	= tf.gather(cost_per_edge_fuzzy,	tf.range(n_acc, tf.add(n_acc, n_edges[i])))
-		costs_binary_i 	= tf.gather(cost_per_edge_binary,	tf.range(n_acc, tf.add(n_acc, n_edges[i])))
-
-		# The total TSP cost for this problem is the sum of all its costs
-		problem_cost_prediction_fuzzy	= tf.reduce_sum(costs_fuzzy_i)
-		problem_cost_prediction_binary	= tf.reduce_sum(costs_binary_i)
-
-		# Update TensorArray
-		cost_predictions_fuzzy	= cost_predictions_fuzzy.write( i, problem_cost_prediction_fuzzy )
-		cost_predictions_binary	= cost_predictions_binary.write( i, problem_cost_prediction_binary )
-		return tf.add(i, tf.constant(1)), tf.add(n_acc, n_edges[i]), cost_predictions_fuzzy, cost_predictions_binary
-	#end _vote_while_body
-	
-	# Obtain a list of predictions, one per problem
-	cost_predictions_fuzzy 	= tf.TensorArray( size = p, dtype = tf.float32 )
-	cost_predictions_binary = tf.TensorArray( size = p, dtype = tf.float32 )
-	_, _, cost_predictions_fuzzy, cost_predictions_binary = tf.while_loop(
-		_vote_while_cond,
-		_vote_while_body,
-		[ tf.constant(0), tf.constant(0), cost_predictions_fuzzy, cost_predictions_binary ]
-	)
-	cost_predictions_fuzzy 	= cost_predictions_fuzzy.stack()
-	cost_predictions_binary = cost_predictions_binary.stack()
-
-	# Define losses, accuracies, optimizer, train step
-	
-	# Define cost loss, which is the mean squared error between the 'fuzzy'
-	# route cost computed from edge probabilities and the cost label
-	cost_loss = tf.losses.mean_squared_error(tf.reduce_sum(route_cost), tf.reduce_sum(cost_predictions_fuzzy))
-
-	# Define cost accuracy, which is the deviation between the 'binary' route
-	# cost computed from the binarized edge probabilities and the cost label
-	cost_acc = tf.reduce_mean(
-		tf.div(
-			tf.subtract(cost_predictions_binary, route_cost),
-			tf.add(route_cost, tf.constant(10**(-5)))
-			)
+	cost_loss = tf.losses.mean_squared_error(
+		tf.reduce_sum(tf.multiply(gnn.matrix_placeholders['W'], E_prob)),
+		tf.reduce_sum(tf.multiply(gnn.matrix_placeholders['W'], route_edges))
 		)
 
+	# Define cost_deviation as the relative deviation between the predicted
+	# cost and the true route cost
+	predicted_cost 	= tf.reduce_sum(tf.multiply(gnn.matrix_placeholders['W'], E_prob))
+	true_cost 		= tf.reduce_sum(tf.multiply(gnn.matrix_placeholders['W'], route_edges))
+	cost_deviation 	= tf.reduce_mean(
+		tf.div(
+			tf.subtract(predicted_cost,true_cost),
+			true_cost
+			)
+		)
 	
 	# Count the number of edges that appear in the solution
 	pos_edges_n = tf.reduce_sum(route_edges)
@@ -296,10 +251,6 @@ def build_network(d):
 	GNN["route_cost"] 				= route_cost
 	GNN["route_edges"]				= route_edges
 	
-	GNN["cost_predictions_fuzzy"] 	= cost_predictions_fuzzy
-	GNN["cost_predictions_binary"] 	= cost_predictions_binary
-	GNN["avg_cost_fuzzy"]			= tf.reduce_mean(cost_predictions_fuzzy)
-	GNN["avg_cost_binary"]			= tf.reduce_mean(cost_predictions_binary)
 	GNN["cost_loss"]				= cost_loss
 	GNN["edges_loss"]				= edges_loss
 	
@@ -307,8 +258,8 @@ def build_network(d):
 	GNN["recall"]					= recall
 	GNN["true_negative_rate"]		= true_negative_rate
 	GNN["accuracy"]					= accuracy
-
 	GNN["top_edges_acc"]			= top_edges_acc
+	GNN["cost_deviation"]			= cost_deviation
 	
 	GNN["cost_train_step"] 			= cost_train_step
 	GNN["edges_train_step"] 		= edges_train_step
@@ -320,7 +271,7 @@ def build_network(d):
 
 if __name__ == '__main__':
 	
-	create_datasets 	= False
+	create_datasets 	= True
 	load_checkpoints	= False
 	save_checkpoints	= True
 
@@ -328,8 +279,8 @@ if __name__ == '__main__':
 	epochs 				= 100
 	batch_size			= 32
 	batches_per_epoch 	= 128
-	time_steps 			= 32
-	loss_type			= "edges"
+	time_steps 			= 16
+	loss_type			= "cost"
 
 	print('\n\n')
 
@@ -375,6 +326,7 @@ if __name__ == '__main__':
 				train_true_negative_rate    = np.zeros(batches_per_epoch)
 				train_accuracy              = np.zeros(batches_per_epoch)
 				train_tacc 					= np.zeros(batches_per_epoch)
+				train_cost_deviation		= np.zeros(batches_per_epoch)
 
 				# Run batches
 				for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), batches_per_epoch):
@@ -386,8 +338,8 @@ if __name__ == '__main__':
 					M, W = to_quiver(Ma_all, Mw_all)
 
 					# Run one SGD iteration
-					_, train_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], e_prob = sess.run(
-						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["precision"], GNN["recall"], GNN["true_negative_rate"], GNN["accuracy"], GNN["top_edges_acc"], GNN["E_prob"] ],
+					_, train_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], cost_deviation[batch_i], e_prob = sess.run(
+						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["precision"], GNN["recall"], GNN["true_negative_rate"], GNN["accuracy"], GNN["top_edges_acc"], GNN["cost_deviation"],  GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -418,17 +370,16 @@ if __name__ == '__main__':
 					print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
 						top_edges_acc = train_tacc[batch_i]
 						))
-					predicted_edges = np.nonzero(np.round(e_prob))[0]
-					discarded_edges = np.nonzero(np.round(1-e_prob))[0]
-					#print([ (w, np.round(len([e for e in discarded_edges if np.round(10*W[e]) == w])/len([e for e in range(e_prob.shape[0]) if np.round(10*W[e]) == w]),2) if len([e for e in range(e_prob.shape[0]) if np.round(10*W[e]) == w]) > 0 else 0 ) for w in range(10) ])
+					print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
+						cost_deviation = cost_deviation[batch_i]
+						))
 					print('')
-
-					
-
 				#end
 
 				# Print train epoch summary
-				print('Train Epoch {epoch} Averages')
+				print('Train Epoch {epoch} Averages'.format(
+					epoch = epoch
+					))
 				print('Loss:\t\t\t\t\t\t\t{loss}'.format(
 					loss = np.mean(train_loss)
 					))
@@ -441,6 +392,9 @@ if __name__ == '__main__':
 				print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
 					top_edges_acc = np.mean(train_tacc)
 					))
+				print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
+						cost_deviation = np.mean(cost_deviation)
+						))
 				print('')
 
 				print("Testing...")
@@ -454,6 +408,7 @@ if __name__ == '__main__':
 				test_true_negative_rate	= np.zeros(batches_per_epoch)
 				test_accuracy          	= np.zeros(batches_per_epoch)
 				test_tacc 				= np.zeros(batches_per_epoch)
+				test_cost_deviation		= np.zeros(batches_per_epoch)
 
 				# Run batches
 				for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), batches_per_epoch):
@@ -464,8 +419,8 @@ if __name__ == '__main__':
 					# Convert to quiver format
 					M, W = to_quiver(Ma_all, Mw_all)
 
-					test_loss[batch_i], test_precision[batch_i], test_recall[batch_i], test_true_negative_rate[batch_i], test_accuracy[batch_i], test_tacc[batch_i], e_prob = sess.run(
-						[ GNN["{}_loss".format(loss_type)], GNN["precision"], GNN["recall"], GNN["true_negative_rate"], GNN["accuracy"], GNN["top_edges_acc"], GNN["E_prob"] ],
+					test_loss[batch_i], test_precision[batch_i], test_recall[batch_i], test_true_negative_rate[batch_i], test_accuracy[batch_i], test_tacc[batch_i], test_cost_deviation[batch_i], e_prob = sess.run(
+						[ GNN["{}_loss".format(loss_type)], GNN["precision"], GNN["recall"], GNN["true_negative_rate"], GNN["accuracy"], GNN["top_edges_acc"], GNN["cost_deviation"], GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -494,6 +449,9 @@ if __name__ == '__main__':
 				print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
 					top_edges_acc = np.mean(test_tacc)
 					))
+				print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
+						cost_deviation = np.mean(cost_deviation)
+						))
 				print('')
 
 				# Save weights
@@ -502,7 +460,7 @@ if __name__ == '__main__':
 				print('--------------------------------------------------------------------\n')
 
 				# Write train and test results into log file
-				logfile.write("{epoch} {tr_loss} {tr_precision} {tr_recall} {tr_true_negative_rate} {tr_acc} {tr_tacc} {te_loss} {te_precision} {te_recall} {te_true_negative_rate} {te_acc} {te_tacc}\n".format(
+				logfile.write("{epoch} {tr_loss} {tr_precision} {tr_recall} {tr_true_negative_rate} {tr_acc} {tr_tacc} {tr_cost_dev} {te_loss} {te_precision} {te_recall} {te_true_negative_rate} {te_acc} {te_tacc} {te_cost_dev}\n".format(
 					epoch 		= epoch,
 					tr_loss 				= np.mean(train_loss),
 					tr_precision 			= np.mean(train_precision),
@@ -510,13 +468,15 @@ if __name__ == '__main__':
 					tr_true_negative_rate 	= np.mean(train_true_negative_rate),
 					tr_acc 					= np.mean(train_accuracy),
 					tr_tacc 				= np.mean(train_tacc),
+					tr_cost_dev				= np.mean(train_cost_deviation),
 
 					te_loss 				= np.mean(test_loss),
 					te_precision 			= np.mean(test_precision),
 					te_recall 				= np.mean(test_recall),
 					te_true_negative_rate 	= np.mean(test_true_negative_rate),
 					te_acc 					= np.mean(test_accuracy),
-					te_tacc 				= np.mean(test_tacc)
+					te_tacc 				= np.mean(test_tacc),
+					te_cost_dev				= np.mean(test_cost_deviation)
 					)
 				)
 				logfile.flush()
