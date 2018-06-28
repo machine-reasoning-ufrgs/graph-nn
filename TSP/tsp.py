@@ -180,9 +180,7 @@ def build_network(d):
 			)
 		)
 
-	# Compute precision and recall in terms of selected edges
-	# Precision = |{relevant items} ∩ {retrieved items}| / |{retrieved items}|
-	# Recall 	= |{relevant items} ∩ {retrieved items}| / |{relevant items}|
+	# Compute precision, recall, true negative rate and accuracy in terms of selected edges
 
 	true_positives = tf.reduce_sum(
 			tf.multiply(
