@@ -11,6 +11,8 @@ from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
 from tsp_utils import InstanceLoader, create_dataset_metric, to_quiver
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 def build_network(d):
 	# Hyperparameters
 	learning_rate = 2e-5
@@ -178,9 +180,11 @@ def build_network(d):
 			)
 		)
 
-	# Compute the proportion of correctly guessed edges that DO appear in the solution
-	pos_edges_acc = tf.divide(
-		tf.reduce_sum(
+	# Compute precision and recall in terms of selected edges
+	# Precision = |{relevant items} ∩ {retrieved items}| / |{retrieved items}|
+	# Recall 	= |{relevant items} ∩ {retrieved items}| / |{relevant items}|
+
+	true_positives = tf.reduce_sum(
 			tf.multiply(
 				route_edges,
 				tf.cast(
@@ -191,15 +195,11 @@ def build_network(d):
 					tf.float32
 					)
 			)
-		),
-		pos_edges_n
-	)
+		)
 
-	# Compute the proportion of correctly guessed edges that DO NOT appear in the solution
-	neg_edges_acc = tf.divide(
-		tf.reduce_sum(
+	true_negatives = tf.reduce_sum(
 			tf.multiply(
-				tf.subtract(tf.ones_like(route_edges), route_edges),
+				tf.subtract(tf.ones_like(route_edges),route_edges),
 				tf.cast(
 					tf.equal(
 						route_edges,
@@ -208,12 +208,72 @@ def build_network(d):
 					tf.float32
 					)
 			)
-		),
-		neg_edges_n
+		)
+
+	false_positives = tf.reduce_sum(
+			tf.multiply(
+				tf.subtract(tf.ones_like(route_edges),route_edges),
+				tf.cast(
+					tf.not_equal(
+						route_edges,
+						tf.round(E_prob)
+						),
+					tf.float32
+					)
+			)
+		)
+
+	false_negatives = tf.reduce_sum(
+			tf.multiply(
+				route_edges,
+				tf.cast(
+					tf.not_equal(
+						route_edges,
+						tf.round(E_prob)
+						),
+					tf.float32
+					)
+			)
+		)
+
+	precision = tf.divide(
+		true_positives,
+		tf.add(true_positives,false_positives)
 	)
 
-	# Define edges accuracy as the arithmetic mean of pos_edges_acc and neg_edges_acc
-	edges_acc = tf.reduce_mean([pos_edges_acc, neg_edges_acc])
+	recall = tf.divide(
+		true_positives,
+		tf.add(true_positives,false_negatives)
+	)
+
+	true_negative_rate = tf.divide(
+		true_negatives,
+		tf.add(true_negatives,false_positives)
+	)
+
+	accuracy = tf.divide(
+		tf.add(true_positives,true_negatives),
+		tf.reduce_sum([true_positives,true_negatives,false_positives,false_negatives])
+	)
+
+	# top_k accuracy
+	top_edges_acc = tf.reduce_mean(
+		tf.cast(
+			tf.equal(
+				# Sum one-hot representations to obtain edges mask
+				tf.reduce_sum(
+					# Convert array of indices to array of one-hot representations
+					tf.one_hot(
+						# Get the indices of the 'n' edges with the higher probabilities (as given by E_prob)
+						tf.nn.top_k(E_prob, k=n)[1],
+						depth = tf.shape(route_edges)[0]
+						)
+					),
+					route_edges
+				),
+			tf.float32
+			)
+		)
 	
 	vars_cost 		= tf.zeros([])
 	tvars 			= tf.trainable_variables()
@@ -237,21 +297,26 @@ def build_network(d):
 	GNN["n_edges"]					= n_edges
 	GNN["route_cost"] 				= route_cost
 	GNN["route_edges"]				= route_edges
+	
 	GNN["cost_predictions_fuzzy"] 	= cost_predictions_fuzzy
 	GNN["cost_predictions_binary"] 	= cost_predictions_binary
 	GNN["avg_cost_fuzzy"]			= tf.reduce_mean(cost_predictions_fuzzy)
 	GNN["avg_cost_binary"]			= tf.reduce_mean(cost_predictions_binary)
 	GNN["cost_loss"]				= cost_loss
 	GNN["edges_loss"]				= edges_loss
-	GNN["cost_acc"]					= cost_acc
-	GNN["pos_edges_acc"]			= pos_edges_acc
-	GNN["neg_edges_acc"]			= neg_edges_acc
-	GNN["edges_acc"]				= edges_acc
-	GNN["cost_loss"] 				= cost_loss
-	GNN["edges_loss"] 				= edges_loss
+	
+	GNN["precision"]				= precision
+	GNN["recall"]					= recall
+	GNN["true_negative_rate"]		= true_negative_rate
+	GNN["accuracy"]					= accuracy
+
+	GNN["top_edges_acc"]			= top_edges_acc
+	
 	GNN["cost_train_step"] 			= cost_train_step
 	GNN["edges_train_step"] 		= edges_train_step
+	
 	GNN["E_prob"]					= E_prob
+	
 	return GNN
 #end
 
@@ -259,14 +324,16 @@ if __name__ == '__main__':
 	
 	create_datasets 	= False
 	load_checkpoints	= False
-	save_checkpoints	= False
+	save_checkpoints	= True
 
 	d 					= 128
-	epochs 				= 1000
+	epochs 				= 100
 	batch_size			= 32
 	batches_per_epoch 	= 128
 	time_steps 			= 32
 	loss_type			= "edges"
+
+	print('\n\n')
 
 	if create_datasets:
 		n = 20
@@ -290,7 +357,7 @@ if __name__ == '__main__':
 	with tf.Session(config=config) as sess:
 		
 		# Initialize global variables
-		print( "{timestamp}\t{memory}\tInitializing global variables ... ".format( timestamp = timestamp(), memory = memory_usage() ) )
+		print("Initializing global variables ... ")
 		sess.run( tf.global_variables_initializer() )
 
 		# Restore saved weights
@@ -298,14 +365,18 @@ if __name__ == '__main__':
 
 		with open("log-TSP-{}.dat".format(loss_type),"w") as logfile:
 			# Run for a number of epochs
-			print( "{timestamp}\t{memory}\tRunning for {} epochs".format( epochs, timestamp = timestamp(), memory = memory_usage() ) )
+			print("Running for {} epochs\n".format(epochs))
 			for epoch in range( epochs ):
 
 				# Reset train loader because we are starting a new epoch
 				train_loader.reset()
 
-				# Init epoch train loss and epoch train accuracy
-				e_loss_train, e_pacc_train, e_nacc_train, e_acc_train = 0, 0, 0, 0
+				train_loss 					= np.zeros(batches_per_epoch)
+				train_precision             = np.zeros(batches_per_epoch)
+				train_recall                = np.zeros(batches_per_epoch)
+				train_true_negative_rate    = np.zeros(batches_per_epoch)
+				train_accuracy              = np.zeros(batches_per_epoch)
+				train_tacc 					= np.zeros(batches_per_epoch)
 
 				# Run batches
 				for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), batches_per_epoch):
@@ -317,8 +388,8 @@ if __name__ == '__main__':
 					M, W = to_quiver(Ma_all, Mw_all)
 
 					# Run one SGD iteration
-					_, loss, pacc, nacc, acc, e_prob = sess.run(
-						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)], GNN["E_prob"] ],
+					_, train_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], e_prob = sess.run(
+						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["precision"], GNN["recall"], GNN["true_negative_rate"], GNN["accuracy"], GNN["top_edges_acc"], GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -330,61 +401,61 @@ if __name__ == '__main__':
 						}
 					)
 
-					# Update epoch train loss and epoch train accuracy
-					e_loss_train 	+= loss
-					e_pacc_train	+= pacc
-					e_nacc_train 	+= nacc
-					e_acc_train 	+= acc
+					print('Train Epoch {epoch}\tBatch {batch}\t(n,m,batch size):\t\t({n},{m},{batch_size})'.format(
+						epoch = epoch,
+						batch = batch_i,
+						n = np.sum(n_vertices),
+						m = np.sum(n_edges),
+						batch_size = batch_size
+						))
+					print('Loss:\t\t\t\t\t\t\t{loss:.3f}'.format(
+						loss = train_loss[batch_i]
+						))
+					print('(Precision, Recall, True Negative Rate, Accuracy):\t({precision:.3f}, {recall:.3f}, {true_negative_rate:.3f}, {accuracy:.3f})'.format(
+						precision 			= train_precision[batch_i],
+						recall 				= train_recall[batch_i],
+						true_negative_rate	= train_true_negative_rate[batch_i],
+						accuracy 			= train_accuracy[batch_i],
+						))
+					print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
+						top_edges_acc = train_tacc[batch_i]
+						))
+					predicted_edges = np.nonzero(np.round(e_prob))[0]
+					discarded_edges = np.nonzero(np.round(1-e_prob))[0]
+					#print([ (w, np.round(len([e for e in discarded_edges if np.round(10*W[e]) == w])/len([e for e in range(e_prob.shape[0]) if np.round(10*W[e]) == w]),2) if len([e for e in range(e_prob.shape[0]) if np.round(10*W[e]) == w]) > 0 else 0 ) for w in range(10) ])
+					print('')
 
-					# Print batch summary
-					print(
-						"{timestamp}\t{memory}\tTrain Epoch {epoch}\tBatch {batch} (n,m,batch size): ({n},{m},{batch_size}) | (Loss,+Acc,-Acc,Acc): ({loss:.3f},{pacc:.3f},{nacc:.3f},{acc:.3f}) | (Avg.,Std.) E_Prob: ({avg_eprob:.3f},{std_eprob:.3f})".format(
-							timestamp 	= timestamp(),
-							memory 		= memory_usage(),
-							epoch 		= epoch,
-							batch 		= batch_i,
-							loss 		= loss,
-							pacc 		= pacc,
-							nacc 		= nacc,
-							acc 		= acc,
-							n 			= sum(n_vertices),
-							m 			= sum(n_edges),
-							batch_size 	= batch_size,
-							avg_eprob	= np.mean(e_prob),
-							std_eprob	= np.std(e_prob)
-						),
-						flush = True
-					)
+					
+
 				#end
-				
-				# Normalize epoch train loss and epoch train accuracy
-				e_loss_train 	/= batches_per_epoch
-				e_pacc_train 	/= batches_per_epoch
-				e_nacc_train 	/= batches_per_epoch
-				e_acc_train 	/= batches_per_epoch
-				
+
 				# Print train epoch summary
-				print(
-					"{timestamp}\t{memory}\tTrain Epoch {epoch}\tMain (Loss,Acc,Avg.Pred): ({loss:.3f},{acc:.3f})".format(
-						timestamp 	= timestamp(),
-						memory 		= memory_usage(),
-						epoch 		= epoch,
-						loss 		= e_loss_train,
-						acc 		= e_acc_train
-					),
-					flush = True
-				)
+				print('Train Epoch {epoch} Averages')
+				print('Loss:\t\t\t\t\t\t\t{loss}'.format(
+					loss = np.mean(train_loss)
+					))
+				print('(Precision, Recall, True Negative Rate, Accuracy):\t({precision:.3f}, {recall:.3f}, {true_negative_rate:.3f}, {accuracy:.3f})'.format(
+					precision 			= np.mean(train_precision),
+					recall 				= np.mean(train_recall),
+					true_negative_rate	= np.mean(train_true_negative_rate),
+					accuracy 			= np.mean(train_accuracy),
+					))
+				print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
+					top_edges_acc = np.mean(train_tacc)
+					))
+				print('')
 
-				# Save weights
-				if save_checkpoints: save_weights(sess,"./TSP-checkpoints-{}".format(loss_type));
-
-				print("{timestamp}\t{memory}\tTesting...".format(timestamp=timestamp(), memory=memory_usage()))
+				print("Testing...")
 				
 				# Reset test loader as we are starting a new epoch
 				test_loader.reset()
 				
-				# Init epoch test loss and epoch test accuracy
-				e_loss_test, e_pacc_test, e_nacc_test, e_acc_test = 0, 0, 0, 0
+				test_loss				= np.zeros(batches_per_epoch)
+				test_precision			= np.zeros(batches_per_epoch)
+				test_recall   			= np.zeros(batches_per_epoch)
+				test_true_negative_rate	= np.zeros(batches_per_epoch)
+				test_accuracy          	= np.zeros(batches_per_epoch)
+				test_tacc 				= np.zeros(batches_per_epoch)
 
 				# Run batches
 				for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), batches_per_epoch):
@@ -395,9 +466,8 @@ if __name__ == '__main__':
 					# Convert to quiver format
 					M, W = to_quiver(Ma_all, Mw_all)
 
-					# Run one SGD iteration
-					loss, pacc, nacc, acc, e_prob = sess.run(
-						[ GNN["{}_loss".format(loss_type)], GNN["pos_edges_acc"], GNN["neg_edges_acc"], GNN["{}_acc".format(loss_type)], GNN["E_prob"] ],
+					test_loss[batch_i], test_precision[batch_i], test_recall[batch_i], test_true_negative_rate[batch_i], test_accuracy[batch_i], test_tacc[batch_i], e_prob = sess.run(
+						[ GNN["{}_loss".format(loss_type)], GNN["precision"], GNN["recall"], GNN["true_negative_rate"], GNN["accuracy"], GNN["top_edges_acc"], GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
 							GNN["gnn"].matrix_placeholders["W"]:	W,
@@ -408,43 +478,47 @@ if __name__ == '__main__':
 							GNN["route_cost"]: 						route_cost,
 						}
 					)
-
-					# Update epoch test loss and epoch test accuracy
-					e_loss_test += loss
-					e_pacc_test	+= pacc
-					e_nacc_test	+= nacc
-					e_acc_test 	+= acc
 				#end
-
-				# Normalize epoch test loss and epoch test accuracy
-				e_loss_test /= batches_per_epoch
-				e_pacc_test	/= batches_per_epoch
-				e_nacc_test	/= batches_per_epoch
-				e_acc_test 	/= batches_per_epoch
 				
 				# Print test epoch summary
-				print(
-					"{timestamp}\t{memory}\tTest Epoch {epoch}\tMain (Loss,Acc,Avg.Pred): ({loss:.3f},\t{acc:.3f})".format(
-						timestamp 	= timestamp(),
-						memory 		= memory_usage(),
-						epoch 		= epoch,
-						loss 		= e_loss_test,
-						acc 		= e_acc_test,
-					),
-					flush = True
-				)
+				print('Test Epoch {epoch} Averages'.format(
+					epoch = epoch
+					))
+				print('Loss:\t\t\t\t\t\t\t{loss:.3f}'.format(
+					loss = np.mean(test_loss)
+					))
+				print('(Precision, Recall, True Negative Rate, Accuracy):\t({precision:.3f}, {recall:.3f}, {true_negative_rate:.3f}, {accuracy:.3f})'.format(
+					precision 			= np.mean(test_precision),
+					recall 				= np.mean(test_recall),
+					true_negative_rate	= np.mean(test_true_negative_rate),
+					accuracy 			= np.mean(test_accuracy),
+					))
+				print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
+					top_edges_acc = np.mean(test_tacc)
+					))
+				print('')
+
+				# Save weights
+				if save_checkpoints: save_weights(sess,"./TSP-checkpoints-{}".format(loss_type));
+
+				print('--------------------------------------------------------------------\n')
 
 				# Write train and test results into log file
-				logfile.write("{epoch} {loss_train} {pacc_train} {nacc_train} {acc_train} {loss_test} {acc_test} {pacc_test} {nacc_test}\n".format(
+				logfile.write("{epoch} {tr_loss} {tr_precision} {tr_recall} {tr_true_negative_rate} {tr_acc} {tr_tacc} {te_loss} {te_precision} {te_recall} {te_true_negative_rate} {te_acc} {te_tacc}\n".format(
 					epoch 		= epoch,
-					loss_train 	= e_loss_train,
-					pacc_train 	= e_pacc_train,
-					nacc_train 	= e_nacc_train,
-					acc_train 	= e_acc_train,
-					loss_test 	= e_loss_test,
-					pacc_test 	= e_pacc_test,
-					nacc_test 	= e_nacc_test,
-					acc_test 	= e_acc_test
+					tr_loss 				= np.mean(train_loss),
+					tr_precision 			= np.mean(train_precision),
+					tr_recall 				= np.mean(train_recall),
+					tr_true_negative_rate 	= np.mean(train_true_negative_rate),
+					tr_acc 					= np.mean(train_accuracy),
+					tr_tacc 				= np.mean(train_tacc),
+
+					te_loss 				= np.mean(test_loss),
+					te_precision 			= np.mean(test_precision),
+					te_recall 				= np.mean(test_recall),
+					te_true_negative_rate 	= np.mean(test_true_negative_rate),
+					te_acc 					= np.mean(test_accuracy),
+					te_tacc 				= np.mean(test_tacc)
 					)
 				)
 				logfile.flush()
