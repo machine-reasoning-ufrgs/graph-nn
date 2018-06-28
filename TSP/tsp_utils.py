@@ -219,7 +219,7 @@ def get_edges_mask(Ma,route):
 	edge_index = { (i,j):e for (e,(i,j)) in enumerate(edges) }
 
 	route_edges = np.zeros(len(edges))
-	for (i,j) in zip(route,route[:-1]+route[:1]):
+	for (i,j) in zip(route,route[1:]+route[:1]):
 		route_edges[edge_index[i,j]] = 1
 		route_edges[edge_index[j,i]] = 1
 	#end

@@ -33,7 +33,7 @@ if __name__ == '__main__':
 		sess.run( tf.global_variables_initializer() )
 
 		# Restore saved weights
-		load_weights(sess,"./TSP-checkpoints-{} BACKUP".format(loss_type))
+		load_weights(sess,"./TSP-checkpoints-{}".format(loss_type))
 
 		# Run 4 tests
 		n = 20
@@ -53,11 +53,11 @@ if __name__ == '__main__':
 			M, W = to_quiver(Ma,Mw)
 
 			# Get edges' probabilities
-			e_prob, pacc, nacc = sess.run(
-				[ GNN["E_prob"], GNN["pos_edges_acc"], GNN["neg_edges_acc"] ],
+			e_prob, precision, recall = sess.run(
+				[ GNN["E_prob"], GNN["precision"], GNN["recall"] ],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]:	M,
-					GNN["gnn"].matrix_placeholders["W"]:	10*W,
+					GNN["gnn"].matrix_placeholders["W"]:	W,
 					GNN["n_vertices"]:						[Ma.shape[0]],
 					GNN["n_edges"]:							[len(edges)],
 					GNN["gnn"].time_steps: 					time_steps,
@@ -65,62 +65,37 @@ if __name__ == '__main__':
 				}
 			)
 
-			true_edges = list(zip(route,route[1:]+[route[0]]))
-			predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0] ]
-			#predicted_edges = [ edges[e] for e in e_prob.argsort()[-40:][::-1] ]
+			true_edges = list(zip(route,route[1:]+route[:1])) + list(zip(route[1:]+route[:1],route))
+			#predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0]  ]
+			predicted_edges = [ edges[e] for e in e_prob.argsort()[-40:][::-1]]
+
+			print("Precision, Recall: {}, {}".format(precision,recall))
 
 			edge_index = { (i,j):e for (e,(i,j)) in enumerate(edges) }
 
 			# Draw nodes
 			plt.scatter(x=nodes[:,0], y=nodes[:,1])
 
-			# For each node
-			visited = set()
-			i = np.random.randint(n)
-			while len(visited) < n:
-				# Get the most probable connection
-				j = np.array([ e_prob[edge_index[(i,j)]] if (Ma[i,j] == 1 and i != j and j not in visited) else 0 for j in range(n) ]).argsort()[-1]
-				# Get coords
+			## Draw predicted edges
+			for (i,j) in predicted_edges:
 				x1,x2 = nodes[i,0],nodes[j,0]
 				y1,y2 = nodes[i,1],nodes[j,1]
-				# Draw edge
-				if (i,j) in true_edges:
-					plt.plot([x1,x2],[y1,y2], 'b', linewidth=1)
-				else:
-					plt.plot([x1,x2],[y1,y2], 'r--', linewidth=1)
+				if (i,j) not in true_edges:
+					plt.plot([x1,x2],[y1,y2], 'g--')
 				#end
-				# Add to visited
-				i = j 
-				visited.add(i)
 			#end
 
-			#for e,(i,j) in enumerate(edges):
-			#	if e_prob[e] < 0.5:
-			#		continue
-			#	#end
-			#	x1,x2 = nodes[i,0],nodes[j,0]
-			#	y1,y2 = nodes[i,1],nodes[j,1]
-			#	plt.plot([x1,x2],[y1,y2], color=hsv_to_rgb((1,1,(e_prob[e]-0.5)/0.5)), linewidth=e_prob[e])
-			##end
-
-			### Draw predicted edges
-			#for (i,j) in predicted_edges:
-			#	x1,x2 = nodes[i,0],nodes[j,0]
-			#	y1,y2 = nodes[i,1],nodes[j,1]
-			#	plt.plot([x1,x2],[y1,y2], 'g--', linewidth=0.5)
-			##end
-
-			## Draw true edges
-			#for (i,j) in true_edges:
-			#	x1,x2 = nodes[i,0],nodes[j,0]
-			#	y1,y2 = nodes[i,1],nodes[j,1]
-#
-			#	if (i,j) in predicted_edges:
-			#		plt.plot([x1,x2],[y1,y2], 'b-')
-			#	else:
-			#		plt.plot([x1,x2],[y1,y2], 'r--')
-			#	#end
-			##end
+			# Draw true edges
+			for (i,j) in true_edges:
+				x1,x2 = nodes[i,0],nodes[j,0]
+				y1,y2 = nodes[i,1],nodes[j,1]
+			
+				if (i,j) in predicted_edges:
+					plt.plot([x1,x2],[y1,y2], 'b-')
+				else:
+					plt.plot([x1,x2],[y1,y2], 'r--')
+				#end
+			#end
 
 			plt.show()
 
