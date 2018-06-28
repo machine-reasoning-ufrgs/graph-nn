@@ -1,3 +1,6 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
 import sys, os, time
 import tensorflow as tf
 import numpy as np
@@ -280,7 +283,7 @@ if __name__ == '__main__':
 	batch_size			= 32
 	batches_per_epoch 	= 128
 	time_steps 			= 16
-	loss_type			= "cost"
+	loss_type			= sys.argv[0] if len(sys.argv) > 1 and sys.argv[0] in ['cost','edges'] else 'edges'
 
 	print('\n\n')
 
@@ -370,7 +373,7 @@ if __name__ == '__main__':
 					print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
 						top_edges_acc = train_tacc[batch_i]
 						))
-					print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
+					print('Cost deviation:\t\t\t\t\t\t{cost_deviation:.3f}'.format(
 						cost_deviation = train_cost_deviation[batch_i]
 						))
 					print('')
@@ -392,7 +395,7 @@ if __name__ == '__main__':
 				print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
 					top_edges_acc = np.mean(train_tacc)
 					))
-				print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
+				print('Cost deviation:\t\t\t\t\t\t{cost_deviation:.3f}'.format(
 						cost_deviation = np.mean(train_cost_deviation)
 						))
 				print('')
@@ -449,7 +452,7 @@ if __name__ == '__main__':
 				print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
 					top_edges_acc = np.mean(test_tacc)
 					))
-				print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
+				print('Cost deviation:\t\t\t\t\t\t{cost_deviation:.3f}'.format(
 						cost_deviation = np.mean(test_cost_deviation)
 						))
 				print('')
