@@ -262,8 +262,8 @@ def build_network(d):
 				tf.reduce_sum(
 					# Convert array of indices to array of one-hot representations
 					tf.one_hot(
-						# Get the indices of the 'n' edges with the higher probabilities (as given by E_prob)
-						tf.nn.top_k(E_prob, k=n)[1],
+						# Get the indices of the 2n edges with the higher probabilities (as given by E_prob)
+						tf.nn.top_k(E_prob, k=2*n)[1],
 						depth = tf.shape(route_edges)[0]
 						)
 					),
