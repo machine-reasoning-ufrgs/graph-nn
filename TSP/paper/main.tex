@@ -1,0 +1,121 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+% \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading nips_2017
+%
+% to avoid loading the natbib package, add option nonatbib:
+% \usepackage[nonatbib]{nips_2017}
+
+\usepackage{nips_2017}
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+% \usepackage[final]{nips_2017}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithmicx,algorithm,eqparbox,array}
+\usepackage[noend]{algpseudocode}
+
+\title{Learning Traveling Salesperson Routes with Graph Neural Networks}
+
+\author{
+  Marcelo Prates\thanks{Equal conttribution} \\
+  Institute of Informatics\\
+  Federal University of Rio Grande do Sul\\
+  Porto Alegre, Brazil \\
+  \texttt{morprates@inf.ufrgs.br} \\
+  \And
+  Pedro Avelar{$^*$} \\
+  Institute of Informatics\\
+  Federal University of Rio Grande do Sul\\
+  Porto Alegre, Brazil \\
+  \texttt{pedro.avelar@inf.ufrgs.br} \\
+  \And
+  Luis Lamb \\
+  Institute of Informatics\\
+  Federal University of Rio Grande do Sul\\
+  Porto Alegre, Brazil \\
+  \texttt{lamb@inf.ufrgs.br} \\
+  }
+
+\makeatletter
+\def\BState{\State\hskip-\ALG@thistlm}
+\makeatother
+
+\algnewcommand{\LineComment}[1]{\State // #1}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\end{abstract}
+
+\section{Introduction}
+
+\section{Motivation}
+
+Graph Neural Networks (GNNs) have been applied to a wide range of relevant problems [citations needed]. Very interesting recent work has shown how GNNs can be employed to bridge the divide between the neural and symbolic schools of artificial intelligence. In particular, \cite{selsam2018learning} has succeeded in training a GNN as a boolean satisfiability (SAT) predictor by feeding it CNF formulas as features and satisfiability bits (one per formula) as labels, thus learning a rudimentary SAT solver from single-bit supervision. The ``neurosat'' architecture, as the authors call it, is rather simple: it consists of assigning a multidimensional embedding $\in \mathbb{R}^d$ for each literal (i.e. $x_3$, $\neg x_1$, $x_{10}$, etc.) and each clause in a CNF formula and then connecting these embeddings accordingly so that they can send messages to one another -- literals are connected with the clauses in which they appear and vice-versa, and each literal is also connected to its negated variant (i.e. $x_1$ and $\neg x_1$). The model is run for a given number of message passing iterations in which each node in the GNN (i.e. a literal or a clause) adds up element-wise all of the embeddings of its incoming messages, received along its adjacencies, to obtain an accumulated message. The main trainable component of this architecture is a recurrent unit assigned with updating the embedding of a node with this accumulated message. In a nutshell, neurosat iterates a process of ``embedding refinement'' in which literals and clauses become enriched with information about their symbolic neighborhood. After that, each refined literal embedding is translated (by the means of a multilayer perceptron) into a logit probability, all of which are averaged to produce a final satisfiability prediction.
+
+The success story of neurosat is an invitation to assess whether similar performance can be obtained for other $\mathcal{NP}$-Hard problems. Graph problems are suitable candidates, as they fit nicely into the relational structure of GNNs. The Traveling Salesperson Problem (TSP), assigned with finding the shortest length Hamiltonian path in a graph (that which visits each vertex exactly once), is a natural choice given its last longing relevance to computer science. Studying GNN models for TSP has another advantage: it allows us to assess whether GNNs can tackle problems where the connections between elements are labeled with numerical information -- in our case, edges carrying differing weights.
+
+\section{Our Model}
+
+Typical GNN architectures link adjacent vertices in the graph which represents the problem instance by opening a direct communication channel between their corresponding embeddings, in such a way that one can send messages to the other. Concretely, if we picture the collection of all $n$ vertex embeddings at time $t$ as a matrix $\mathbf{V}^t \in \mathbb{R}^{n \times d}$, the process of filtering the incoming messages for each node corresponds to performing a matrix multiplication with the graph's adjacency matrix, $\mathbf{M}$. Then the process of refining all embeddings at once can be expressed by Equation \ref{eq:refining_node_embeddings}, where $\mathbf{V}_u$ is a recurrent unit and $\mathbf{V}_h^t \in \mathbb{R}^{n \times d}$ is a matrix in which each line $\mathbf{V}_h^t[i]$ contains the hidden state, at time t, corresponding to the i-th vertex.
+
+\begin{equation} \label{eq:refining_node_embeddings}
+\mathbf{V}_h^{t+1}, \mathbf{V}^{t+1} \leftarrow \mathbf{V}_u( \mathbf{V}_h^t, \mathbf{M} \times \mathbf{V}^t )
+\end{equation}
+
+However one can see that this approach fails when connections are augmented with some numerical information such as edge weights or capacities. To feed this information into the network, we propose a new architecture which elevates edges to a ``node'' status in the context of the GNN. Concretely, we will assign embeddings to both vertices and edges, and link the embedding of each edge $e=(v_1,v_2)$ with the embeddings of the two vertices it connects ($v_1$ and $v_2$). The importance of having edge embeddings is that now we can feed them their ``labels'' (i.e. edge weights, edge capacities, etc.) at each message-passing timestep.
+
+\begin{algorithm}
+\caption{Graph Neural Network TSP Solver}\label{alg:GNN-TSP}
+\begin{algorithmic}[1]
+\Procedure{GNN-TSP}{$\mathcal{G} = (\mathcal{V},\mathcal{E})$}
+
+\State {\small Enumerate the edges of the graph, assigning an unique index $\mathcal{E}_{idx}[(v_1,v_2)]$ for each edge $(v_1,v_2) \in \mathcal{E}$}
+\State
+\LineComment{{\small Compute adj. matrix from edges to source vertices}}
+\State $\mathbf{M_{EV_{src}}}[e,v] \leftarrow 1 \textrm{ if } \exists v' (\mathcal{E}_{idx}[(v,v')] = e)$
+\LineComment{{\small Compute adj. matrix from edges to target vertices}}
+\State $\mathbf{M_{EV_{tgt}}}[e,v] \leftarrow 1 \textrm{ if } \exists v' (\mathcal{E}_{idx}[(v',v)] = e)$ 
+\State
+\LineComment{Run $t_{max}$ message-passing iterations}
+\For{$t=1 \dots t_{max}$}
+  \LineComment{{\small Refine each vertex embedding with messages received from all the edges in which it appears}}
+  \LineComment{{\small either as a source or a target vertex}}
+  \State $\mathbf{V}_h^{t+1}, \mathbf{V}^{t+1} \leftarrow V_u( \mathbf{V}_h^t, \mathbf{M_{EV_{src}}} \times E_{msg}(\mathbf{E}^t), \mathbf{M_{EV_{tgt}}} \times E_{msg}(\mathbf{E}^t) )$
+  \LineComment{{\small Refine each edge embedding with (two) messages received from its source and its target vertex}}
+  \State $\mathbf{E}_h^{t+1}, \mathbf{E}^{t+1} \leftarrow E_u( \mathbf{E}_h^t, \mathbf{M_{EV_{src}}}^{T} \times V_{msg}(\mathbf{V}^t), \mathbf{M_{EV_{tgt}}}^{T} \times V_{msg}(\mathbf{V}^t), \mathbf{W} )$
+\EndFor
+\State
+\LineComment{{\small Translate edge embeddings into logit probabilities}}
+\State $E_{logits} \leftarrow E_{vote}(E^{t_{max}})$
+\LineComment{{\small Convert logit probabilities into probabilities}}
+\State $E_{prob} \leftarrow sigmoid(E_{logits})$
+\LineComment{{\small Extract route}}
+\State $Route \leftarrow \{ e ~|~ e \in \{1,\dots,|\mathcal{E}|\}, E_{prob}[e] > 0.5 \}$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\section{Experimental Setup}
+
+\section{Results and Analysis}
+
+\section{Discussion}
+
+\bibliographystyle{named}
+\bibliography{bib}
+
+\end{document}
