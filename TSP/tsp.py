@@ -371,7 +371,7 @@ if __name__ == '__main__':
 						top_edges_acc = train_tacc[batch_i]
 						))
 					print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
-						cost_deviation = cost_deviation[batch_i]
+						cost_deviation = train_cost_deviation[batch_i]
 						))
 					print('')
 				#end
@@ -393,7 +393,7 @@ if __name__ == '__main__':
 					top_edges_acc = np.mean(train_tacc)
 					))
 				print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
-						cost_deviation = np.mean(cost_deviation)
+						cost_deviation = np.mean(train_cost_deviation)
 						))
 				print('')
 
@@ -450,7 +450,7 @@ if __name__ == '__main__':
 					top_edges_acc = np.mean(test_tacc)
 					))
 				print('Cost deviation:\t\t\t\t\t{cost_deviation:.3f}'.format(
-						cost_deviation = np.mean(cost_deviation)
+						cost_deviation = np.mean(test_cost_deviation)
 						))
 				print('')
 
