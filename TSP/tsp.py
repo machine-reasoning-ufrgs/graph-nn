@@ -274,7 +274,7 @@ def build_network(d):
 
 if __name__ == '__main__':
 	
-	create_datasets 	= False
+	create_datasets 	= True
 	load_checkpoints	= False
 	save_checkpoints	= True
 
@@ -282,7 +282,7 @@ if __name__ == '__main__':
 	epochs 				= 100
 	batch_size			= 32
 	batches_per_epoch 	= 128
-	time_steps 			= 16
+	time_steps 			= 32
 	loss_type			= sys.argv[0] if len(sys.argv) > 1 and sys.argv[0] in ['cost','edges'] else 'edges'
 
 	print('\n\n')
