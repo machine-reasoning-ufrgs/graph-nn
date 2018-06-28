@@ -271,7 +271,7 @@ def build_network(d):
 
 if __name__ == '__main__':
 	
-	create_datasets 	= True
+	create_datasets 	= False
 	load_checkpoints	= False
 	save_checkpoints	= True
 
@@ -338,7 +338,7 @@ if __name__ == '__main__':
 					M, W = to_quiver(Ma_all, Mw_all)
 
 					# Run one SGD iteration
-					_, train_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], cost_deviation[batch_i], e_prob = sess.run(
+					_, train_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], train_cost_deviation[batch_i], e_prob = sess.run(
 						[ GNN["{}_train_step".format(loss_type)], GNN["{}_loss".format(loss_type)], GNN["precision"], GNN["recall"], GNN["true_negative_rate"], GNN["accuracy"], GNN["top_edges_acc"], GNN["cost_deviation"],  GNN["E_prob"] ],
 						feed_dict = {
 							GNN["gnn"].matrix_placeholders["M"]:	M,
