@@ -214,7 +214,19 @@ class GraphNN(object):
 					# msg_f_vs ← msg(f(V))
 					msg_f_vs = self._tf_msgs[D["msg"]]( f_vs ) if D["msg"] is not None else f_vs
 					# m_msg_f_vs ← M × msg(f(V))
-					m_msg_f_vs = tf.matmul( self.matrix_placeholders[ D["mat"] ], msg_f_vs, adjoint_a = D["transpose?"] ) if D["mat"] is not None else msg_f_vs
+					# Note that the matrix multiplication is "normalized" so that it isn't reduce_sum on the messages, but reduce_average instead.
+					m_msg_f_vs = tf.divide(
+						tf.matmul( self.matrix_placeholders[ D["mat"] ], msg_f_vs, adjoint_a = D["transpose?"] ),
+						tf.expand_dims(
+							tf.reduce_sum(
+								self.matrix_placeholders[ D["mat"] ],
+								axis = 0 if D["transpose?"] else 1
+							),
+							axis = 1
+						)
+					) if D["mat"] is not None else (
+						msg_f_vs
+					)
 					# Finally, append
 					inputs.append( m_msg_f_vs )
 				else:
