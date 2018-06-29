@@ -7,10 +7,8 @@
 % to avoid loading the natbib package, add option nonatbib:
 % \usepackage[nonatbib]{nips_2017}
 
-\usepackage{nips_2017}
-
 % to compile a camera-ready version, add the [final] option, e.g.:
-% \usepackage[final]{nips_2017}
+\usepackage[final]{nips_2018}
 
 \usepackage[utf8]{inputenc} % allow utf-8 input
 \usepackage[T1]{fontenc}    % use 8-bit T1 fonts
@@ -24,6 +22,7 @@
 \usepackage{amssymb}
 \usepackage{algorithmicx,algorithm,eqparbox,array}
 \usepackage[noend]{algpseudocode}
+\usepackage{graphicx}
 
 \title{Learning Traveling Salesperson Routes with Graph Neural Networks}
 
@@ -52,6 +51,8 @@
 \makeatother
 
 \algnewcommand{\LineComment}[1]{\State // #1}
+
+\graphicspath{{figures/}}
 
 \begin{document}
 
@@ -120,10 +121,46 @@ The final trainable component of our model is $E_{vote}$, a MLP assigned with tr
 \end{algorithm}
 
 \subsection{Training}
+\label{sub:training}
 
-The most natural way to train this model is to perform stochastic gradient descent on the binary cross entropy loss between the computed edge probabilities and an ``edges mask'' with ones in the indices corresponding to edges in the solution and zeros elsewhere. This training, of course, has the disadvantage of requiring a rather large amount of labels ($|\mathcal{E}|$). We can also anticipate a problem: if the training instances were to allow multiple optimal TSP routes, the network would not be able to choose the same route we compute, as we are required to break ties through some arbitrarily chosen criterion (such as lexicographic ordering of vertices).
+The most natural way to train this model is to perform stochastic gradient descent on the binary cross entropy loss between the computed edge probabilities and an ``edges mask'' with ones in the indices corresponding to edges in the solution and zeros elsewhere. This training, of course, has the disadvantage of requiring a rather large amount of labels ($|\mathcal{E}|$). We can also anticipate a problem: if the training instances were to allow multiple optimal TSP routes, the network would not be able to choose the same route we compute, as we are required to break ties through some arbitrarily chosen criterion (such as lexicographic ordering of vertices). As we will see in the ``Results and Analysis'' section, this is actually the case: unable to choose between two routes of similar or equal cost, the trained model resorts to outputting a superposition of good quality routes. Hopefully, this issue can be treated with a simple fix: we can compute a ``degree loss'' which penalizes nodes with in and out degrees $\neq 1$. This is similar to a flow conservation constraint in the context of Integer Linear Programming (ILP). This can be done by computing two tensors, $\overline{\textrm{deg}^{+}}$ and $\overline{\textrm{deg}^{-}}$, of expected in and out degrees for each vertex, respectively. Concretely, we define:
+
+\begin{equation}
+\begin{aligned}
+\overline{\textrm{deg}^{+}} \leftarrow & \left(M_{EV_{src}}\right)^T \times E_{prob} \\
+\overline{\textrm{deg}^{-}} \leftarrow & \left(M_{EV_{tgt}}\right)^T \times E_{prob} \\
+loss(\textrm{deg}^{-}) \leftarrow & \sum~(\overline{\textrm{deg}^{-}}-1)^2 \\
+loss(\textrm{deg}^{+}) \leftarrow & \sum~(\overline{\textrm{deg}^{+}}-1)^2 \\
+loss(\textrm{deg}) \leftarrow & ~loss(\textrm{deg}^{+}) + loss(\textrm{deg}^{-})
+\end{aligned}
+\end{equation}
+
+And apply stochastic gradient descent on $loss(\textrm{deg})$ in addition to the binary cross entropy between the edges mask and the computed probabilities.
 
 \section{Experimental Setup}
+
+We produce training instances by sampling $n=20$ random points on a $\frac{\sqrt{2}}{2} \times \frac{\sqrt{2}}{2}$ square and filling a distance matrix $\mathbf{D} \in \mathbb{R}^{n \times n}$ with the euclidean distances between each pair of points (which by construction are $\in [0,1]$). We then quantize edge weights into $b=100$ different integer bins, producing $\mathbf{D}' = [b\mathbf{D}]$. For each such set of points we produce two complete graphs $\mathcal{G} = (\mathcal{V},\mathcal{E})$ and $\mathcal{G}_{int} = (\mathcal{V},\mathcal{E}_{int})$ where $\mathcal{V} = \{v_1, \dots, v_n\}$, $\mathcal{E} = \{(v_i,v_j,\frac{1}{b}\mathbf{D}'[i,j]) ~|~ v_i \in \mathcal{V}, v_j \in \mathcal{V}\}$ and $\mathcal{E}_{int} = \{(v_i,v_j,\mathbf{D}'[i,j]) ~|~ v_i \in \mathcal{V}, v_j \in \mathcal{V}\}$. Because $\mathcal{G}$ and $\mathcal{G}_{int}$ identical up to scale, their optimal TSP tours are guaranteed to be the same. Finally, we solve the TSP problem on $\mathcal{G}_{int}$ using Google's Operations Research Tools \cite{or-tools-user-manual} and feed $\mathcal{G}$ to our model as a training instance.
+
+We produce $4096$ such instances, grouping them in batches of $32$. Note that instances can be easily batched by performing a disjoint union over a set of graphs $\{\mathcal{G}_{1} = (\mathcal{V}_1,\mathcal{E}_1), \dots \mathcal{G}_{n} = (\mathcal{V}_n,\mathcal{E}_n)\}$: 
+
+\begin{equation}
+\mathcal{G}_U = \bigcup_{i=1}^{n}{\mathcal{G}_i} = \left(\bigcup_{i=1}^{n}{\mathcal{V}_i}, \bigcup_{i=1}^{n}{\mathcal{E}_i}\right)
+\end{equation}
+
+To produce our features and performing a disjoint union over a set of tours \\ $\{ T_1 \in \mathcal{E}^{|\mathcal{V}_1|}, \dots, T_n \in \mathcal{E}^{|\mathcal{V}_n|} \}$:
+
+\begin{equation}
+T_U = \bigcup_{i=1}^{n}{T_i}
+\end{equation}
+
+To produce our labels. At each batch (from $128$ total) we perform a SGD iteration on both the binary cross entropy between the edges mask and the computed edge probabilities and the ``degree loss'' defined in Section \ref{sub:training}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{training-inst-examples.pdf}
+  \caption{Examples of graphs produced as training instances, with the associated optimal TSP tours painted in different colors.}
+  \label{fig:training-inst-examples}
+\end{figure}
 
 \section{Results and Analysis}
 
