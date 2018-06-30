@@ -180,11 +180,7 @@ def read_graph(filepath):
     return Ma,Mw,route
 #end
 
-def create_dataset_metric(nmin, nmax=None, path, bins=10, samples=1000):
-
-    if nmax is None:
-        nmax = nmin
-    #end
+def create_dataset_metric(nmin, nmax, path, bins=10, samples=1000):
 
     if not os.path.exists(path):
         os.makedirs(path)
