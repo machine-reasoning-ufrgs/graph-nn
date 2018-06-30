@@ -299,7 +299,7 @@ def build_network(d):
 
 if __name__ == '__main__':
     
-    create_datasets     = False
+    create_datasets     = True
     load_checkpoints    = False
     save_checkpoints    = True
 
@@ -311,12 +311,12 @@ if __name__ == '__main__':
     loss_type           = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ['cost','edges'] else 'edges'
 
     if create_datasets:
-        n = 20
+        nmin, nmax = 20, 40
         samples = batch_size*batches_per_epoch
         print("Creating {} train instances...".format(samples))
-        create_dataset_metric(n, path="TSP-train", samples=samples, bins=10**3)
+        create_dataset_metric(nmin, nmax, path="TSP-train", samples=samples, bins=10**3)
         print("\nCreating {} test instances...".format(samples))
-        create_dataset_metric(n, path="TSP-test", samples=samples, bins=10**3)
+        create_dataset_metric(nmin, nmax, path="TSP-test", samples=samples, bins=10**3)
         print('\n')
     #end
 

@@ -180,13 +180,18 @@ def read_graph(filepath):
     return Ma,Mw,route
 #end
 
-def create_dataset_metric(n, path, bins=10, samples=1000):
+def create_dataset_metric(nmin, nmax=None, path, bins=10, samples=1000):
+
+    if nmax is None:
+        nmax = nmin
+    #end
 
     if not os.path.exists(path):
         os.makedirs(path)
     #end if
 
     for i in range(samples):
+        n = np.random.randint(nmin,nmax)
         Ma,Mw,solution,_ = create_graph_metric(n,bins)
         write_graph(Ma,Mw,solution,"{}/{}.graph".format(path,i))
         if (i-1) % (samples//10) == 0:
