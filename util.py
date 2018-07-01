@@ -53,7 +53,7 @@ def reindex_matrix( n, m, M ):
 def load_weights(sess,path,scope=None):
 	if os.path.exists(path):
 		# Restore saved weights
-		print( "{timestamp}\t{memory}\tRestoring saved model ... ".format( timestamp = timestamp(), memory = memory_usage() ) )
+		print("Restoring saved model ... ")
 		# Create model saver
 		if scope is None:
 			saver = tf.train.Saver()
@@ -76,5 +76,5 @@ def save_weights(sess,path,scope=None):
 		saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=scope))
 	#end
 	saver.save(sess, "%s/model.ckpt" % path)
-	print( "{timestamp}\t{memory}\tMODEL SAVED IN PATH: {path}".format( timestamp = timestamp(), memory = memory_usage(), path=path ) )
+	print( "MODEL SAVED IN PATH: {path}\n".format( path=path ) )
 #end
