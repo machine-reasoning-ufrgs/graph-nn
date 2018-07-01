@@ -58,18 +58,14 @@ class InstanceLoader(object):
 
         # route_edges[i]: 1 if the i-th edge belongs to the route of some instance
         route_edges = np.zeros(total_edges, dtype=int)
-        # cost[i]: the cost of the solution to the i-th instance
-        cost = np.zeros(n_instances)
         for (i,route) in [ (i,x[2]) for (i,x) in enumerate(instances) ]:
             route_relabelled = [ sum(n_vertices[0:i])+x for x in route ]
             for x,y in zip(route_relabelled, route_relabelled[1:] + route_relabelled[0:1]):
-                x_, y_ = min(x,y), max(x,y)
-                route_edges[edge_index[(x_,y_)]] = 1
-                cost[i] += Mw_all[x_,y_]
+                route_edges[edge_index[(min(x,y), max(x,y))]] = 1
             #end
         #end
 
-        return Ma_all, Mw_all, n_vertices, n_edges, route_edges, cost
+        return Ma_all, Mw_all, n_vertices, n_edges, route_edges
     #end
 
     def get_batches(self, batch_size):
@@ -222,7 +218,7 @@ def get_edges_mask(Ma,route):
 
     route_edges = np.zeros(len(edges))
     for (i,j) in zip(route,route[1:]+route[:1]):
-        route_edges[edge_index[min(i,j),max(i,j)]] = 1
+        route_edges[edge_index[(min(i,j),max(i,j))]] = 1
     #end
 
     return route_edges
