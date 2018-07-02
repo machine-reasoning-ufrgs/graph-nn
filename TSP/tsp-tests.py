@@ -9,16 +9,73 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from graphnn import GraphNN
 from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
-from tsp_utils import InstanceLoader, create_graph_metric, get_edges_mask, to_quiver
+from tsp_utils import InstanceLoader, create_graph_metric, get_edges_mask, to_quiver, solve
 from tsp import build_network
 from matplotlib import pyplot as plt
 from matplotlib.colors import hsv_to_rgb
 from matplotlib import colors as mcolors
+import itertools
+
+def test_multiple_TSP_solutions():
+
+    n = 20
+    bins = 10**3
+    samples = 100
+    permutations = 10**3
+    for i in range(samples):
+
+        # Select 'n' 2D points in the unit square
+        nodes = np.random.rand(n,2)
+
+        # Build a fully connected adjacency matrix
+        Ma = np.ones((n,n))-np.eye(n)
+        # Build a weight matrix
+        Mw = np.zeros((n,n))
+        for i in range(n):
+            for j in range(n):
+                # Multiply by 1/√2 to normalize
+                Mw[i,j] = (1.0/np.sqrt(2)) * np.sqrt((nodes[i,0]-nodes[j,0])**2+(nodes[i,1]-nodes[j,1])**2)
+            #end
+        #end
+        # Rescale and round weights, quantizing them into 'bins' integer bins
+        Mw = np.round(bins * Mw)
+
+        edges_masks = []
+
+        for perm in itertools.permutations(range(n)):
+            
+            Ma_perm, Mw_perm = np.zeros((n,n)), np.zeros((n,n))
+            for i in range(n):
+                for j in range(n):
+                    Ma_perm[i,j], Mw_perm[i,j] = Ma[perm[i],perm[j]] , Mw[perm[i],perm[j]]
+                #end
+            #end
+
+            # Solve
+            route = solve(Ma_perm,Mw_perm)
+
+            edges_mask = get_edges_mask(Ma, [ route[perm[i]] for i in range(n) ])
+            edges_masks.append(edges_mask)
+
+            if len(set([ str(edges_mask) for edges_mask in edges_masks ])) > 1:
+                break
+            #end
+
+        #end
+
+        print(len(set([ str(edges_mask) for edges_mask in edges_masks ])))
+
+    #end
+
+#end
 
 if __name__ == '__main__':
 
+    test_multiple_TSP_solutions()
+    exit()
+
     d = 128
-    time_steps = 45
+    time_steps = 32
     loss_type = "edges"
 
     # Build model
@@ -38,7 +95,7 @@ if __name__ == '__main__':
 
         k = 3
         # Run k² tests
-        n = 20
+        n = 40
         bins = 10**3
         for inst_i in range(k**2):
 

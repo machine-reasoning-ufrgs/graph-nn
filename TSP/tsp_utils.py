@@ -200,12 +200,14 @@ def to_quiver(Ma, Mw):
     # Define matrices M and W
     M = np.zeros((total_edges,total_vertices))
     W = np.zeros((total_edges,1))
+    R = np.zeros((total_edges,1))
     for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma)[0]), list(np.nonzero(Ma)[1]))):
         M[e,i] = 1
         M[e,j] = 1
         W[e,0] = Mw[i,j]
+        R[e,0] = e / total_edges
     #end
-    return M,W
+    return M,W,R
 #end
 
 def get_edges_mask(Ma,route):

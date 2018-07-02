@@ -37,7 +37,9 @@ def build_network(d):
             # M is a E×V adjacency matrix connecting each edge to the vertices it is connected to
             "M": ("E","V"),
             # W is a column matrix of shape |E|×1 where W[i,1] is the weight of the i-th edge
-            "W": ("E",1)
+            "W": ("E",1),
+            # R is a column matrix of shape |E|×1 where R[i,1] is the (normalized) rank of the i-th edge (used for breaking ties)
+            "R": ("E",1)
         },
         {
             # Vmsg is a MLP which computes messages from vertex embeddings to edge embeddings
@@ -240,10 +242,11 @@ def build_network(d):
                 tf.reduce_sum(
                     # Convert array of indices to array of one-hot representations
                     tf.one_hot(
-                        # Get the indices of the 2n edges with the higher probabilities (as given by E_prob)
-                        tf.nn.top_k(E_prob, k=2*n)[1],
+                        # Get the indices of the n edges with the higher probabilities (as given by E_prob)
+                        tf.nn.top_k(E_prob, k=n)[1],
                         depth = tf.shape(route_edges)[0]
-                        )
+                        ),
+                    axis = 0
                     ),
                     route_edges
                 ),
@@ -274,7 +277,6 @@ def build_network(d):
     GNN["gnn"]                      = gnn
     GNN["n_vertices"]               = n_vertices
     GNN["n_edges"]                  = n_edges
-    GNN["route_cost"]               = route_cost
     GNN["route_edges"]              = route_edges
     
     GNN["cost_loss"]                = cost_loss
@@ -299,7 +301,7 @@ def build_network(d):
 
 if __name__ == '__main__':
     
-    create_datasets     = True
+    create_datasets     = False
     load_checkpoints    = False
     save_checkpoints    = True
 
@@ -307,7 +309,7 @@ if __name__ == '__main__':
     epochs              = 100
     batch_size          = 32
     batches_per_epoch   = 128
-    time_steps          = 32
+    time_steps          = 25
     loss_type           = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ['cost','edges'] else 'edges'
 
     if create_datasets:
@@ -361,10 +363,10 @@ if __name__ == '__main__':
                 for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), batches_per_epoch):
 
                     # Get features, problem sizes, labels for this batch
-                    Ma_all, Mw_all, n_vertices, n_edges, route_edges, route_cost = batch
+                    Ma_all, Mw_all, n_vertices, n_edges, route_edges = batch
 
                     # Convert to quiver format
-                    M, W = to_quiver(Ma_all, Mw_all)
+                    M, W, R = to_quiver(Ma_all, Mw_all)
 
                     # Run one SGD iteration
                     _, train_cost_loss[batch_i], train_edges_loss[batch_i], train_degree_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], train_cost_deviation[batch_i], e_prob = sess.run(
@@ -372,11 +374,11 @@ if __name__ == '__main__':
                         feed_dict = {
                             GNN["gnn"].matrix_placeholders["M"]:    M,
                             GNN["gnn"].matrix_placeholders["W"]:    W,
+                            GNN["gnn"].matrix_placeholders["R"]:    R,
                             GNN["n_vertices"]:                      n_vertices,
                             GNN["n_edges"]:                         n_edges,
                             GNN["gnn"].time_steps:                  time_steps,
-                            GNN["route_edges"]:                     route_edges,
-                            GNN["route_cost"]:                      route_cost,
+                            GNN["route_edges"]:                     route_edges
                         }
                     )
 
