@@ -60,7 +60,7 @@ class InstanceLoader(object):
         route_edges = np.zeros(total_edges, dtype=int)
         for (i,route) in [ (i,x[2]) for (i,x) in enumerate(instances) ]:
             route_relabelled = [ sum(n_vertices[0:i])+x for x in route ]
-            for x,y in zip(route_relabelled, route_relabelled[1:] + route_relabelled[0:1]):
+            for x,y in zip(route_relabelled[:-1], route_relabelled[1:]):
                 route_edges[edge_index[(min(x,y), max(x,y))]] = 1
             #end
         #end
@@ -120,13 +120,19 @@ def solve(Ma, Mw):
     return list(route_generator()) if assignment is not None else []
 #end
 
-def create_graph_metric(n, bins):
+def create_graph_metric(n, bins, connectivity=1):
     
     # Select 'n' 2D points in the unit square
     nodes = np.random.rand(n,2)
 
-    # Build a fully connected adjacency matrix
-    Ma = np.ones((n,n))-np.eye(n)
+    # Build an adjacency matrix with given connectivity
+    Ma = (np.random.rand(n,n) < connectivity).astype(int)
+    for i in range(n):
+        Ma[i,i] = 0
+        for j in range(i+1,n):
+            Ma[i,j] = Ma[j,i]
+        #end
+    #end
     # Build a weight matrix
     Mw = np.zeros((n,n))
     for i in range(n):
@@ -176,15 +182,22 @@ def read_graph(filepath):
     return Ma,Mw,route
 #end
 
-def create_dataset_metric(nmin, nmax, path, bins=10, samples=1000):
+def create_dataset_metric(nmin, nmax, path, bins=10, connectivity=1, samples=1000):
 
     if not os.path.exists(path):
         os.makedirs(path)
     #end if
 
+    solvable = 0
     for i in range(samples):
-        n = np.random.randint(nmin,nmax)
-        Ma,Mw,solution,_ = create_graph_metric(n,bins)
+
+        solution = []
+
+        while solution == []:
+            n = np.random.randint(nmin,nmax)
+            Ma,Mw,solution,_ = create_graph_metric(n,bins,connectivity)
+        #end
+
         write_graph(Ma,Mw,solution,"{}/{}.graph".format(path,i))
         if (i-1) % (samples//10) == 0:
             print('{}% Complete'.format(np.round(100*i/samples)))

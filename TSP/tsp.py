@@ -316,14 +316,14 @@ if __name__ == '__main__':
         nmin, nmax = 20, 30
         samples = batch_size*batches_per_epoch
         print("Creating {} train instances...".format(samples))
-        create_dataset_metric(nmin, nmax, path="TSP-train", samples=samples, bins=10**3)
+        create_dataset_metric(nmin, nmax, path="TSP-train", samples=samples, bins=10**6, connectivity = 0.5)
         print("\nCreating {} test instances...".format(samples))
-        create_dataset_metric(nmin, nmax, path="TSP-test", samples=samples, bins=10**3)
+        create_dataset_metric(nmin, nmax, path="TSP-test", samples=samples, bins=10**6, connectivity = 0.5)
         print('\n')
     #end
 
     # Build model
-    print( "{timestamp}\t{memory}\tBuilding model ...".format( timestamp = timestamp(), memory = memory_usage() ) )
+    print("Building model ...")
     GNN = build_network(d)
 
     # Create train, test loaders
@@ -456,7 +456,7 @@ if __name__ == '__main__':
                     # Convert to quiver format
                     M, W, R = to_quiver(Ma_all, Mw_all)
 
-                    train_cost_loss[batch_i], train_edges_loss[batch_i], train_degree_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], train_cost_deviation[batch_i], e_prob = sess.run(
+                    test_cost_loss[batch_i], test_edges_loss[batch_i], test_degree_loss[batch_i], test_precision[batch_i], test_recall[batch_i], test_true_negative_rate[batch_i], test_accuracy[batch_i], test_tacc[batch_i], test_cost_deviation[batch_i], e_prob = sess.run(
                         [ GNN['cost_loss'], GNN['edges_loss'], GNN['degree_loss'], GNN['precision'], GNN['recall'], GNN['true_negative_rate'], GNN['accuracy'], GNN['top_edges_acc'], GNN['cost_deviation'],  GNN["E_prob"] ],
                         feed_dict = {
                             GNN["gnn"].matrix_placeholders["M"]:    M,
