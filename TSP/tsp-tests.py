@@ -66,16 +66,84 @@ def test_multiple_TSP_solutions():
         print(len(set([ str(edges_mask) for edges_mask in edges_masks ])))
 
     #end
+#end
 
+def compute_route_greedy(n, edges, e_prob):
+
+    # Init route
+    route = []
+
+    # Init visited mask
+    visited = np.zeros(n)
+
+    # Choose initial vertex
+    init = np.random.randint(n)
+    v = init
+
+    # Run n iterations
+    for it in range(n-1):
+
+        visited[v] = 1
+
+        # Choose adjacency with highest probability
+        adjacencies = [ edges[e] for e in e_prob.argsort()[::-1] if (edges[e][0] == v and visited[edges[e][1]] == 0) or (edges[e][1] == v and visited[edges[e][0]] == 0) ]
+        e = adjacencies[0]
+
+        if e[0] == v:
+            v2 = e[1]
+        else:
+            v2 = e[0]
+        #end
+
+        route.append(e)
+        v = v2
+    #end
+
+    route.append((v,init))
+
+    return route
+#end
+
+def compute_route_nearest_neighbor(n, edges, W):
+
+    # Init route
+    route = []
+
+    # Init visited mask
+    visited = np.zeros(n)
+
+    # Choose initial vertex
+    init = np.random.randint(n)
+    v = init
+
+    # Run n iterations
+    for it in range(n-1):
+
+        visited[v] = 1
+
+        # Choose adjacency with highest probability
+        adjacencies = [ edges[e] for e in W[:,0].argsort()[::-1] if (edges[e][0] == v and visited[edges[e][1]] == 0) or (edges[e][1] == v and visited[edges[e][0]] == 0) ]
+        e = adjacencies[0]
+
+        if e[0] == v:
+            v2 = e[1]
+        else:
+            v2 = e[0]
+        #end
+
+        route.append(e)
+        v = v2
+    #end
+
+    route.append((v,init))
+
+    return route
 #end
 
 if __name__ == '__main__':
 
-    test_multiple_TSP_solutions()
-    exit()
-
     d = 128
-    time_steps = 32
+    time_steps = 25
     loss_type = "edges"
 
     # Build model
@@ -95,7 +163,7 @@ if __name__ == '__main__':
 
         k = 3
         # Run k² tests
-        n = 40
+        n = 100
         bins = 10**3
         for inst_i in range(k**2):
 
@@ -109,7 +177,7 @@ if __name__ == '__main__':
             route_edges = get_edges_mask(Ma,route)
 
             # Convert to 'quiver' format
-            M, W = to_quiver(Ma,Mw)
+            M, W, R = to_quiver(Ma,Mw)
 
             # Get edges' probabilities
             e_prob, precision, recall = sess.run(
@@ -117,6 +185,7 @@ if __name__ == '__main__':
                 feed_dict = {
                     GNN["gnn"].matrix_placeholders["M"]:    M,
                     GNN["gnn"].matrix_placeholders["W"]:    W,
+                    GNN["gnn"].matrix_placeholders["R"]:    R,
                     GNN["n_vertices"]:                      [Ma.shape[0]],
                     GNN["n_edges"]:                         [len(edges)],
                     GNN["gnn"].time_steps:                  time_steps,
@@ -125,9 +194,22 @@ if __name__ == '__main__':
             )
 
             true_edges = list(zip(route,route[1:]+route[:1])) + list(zip(route[1:]+route[:1],route))
-            predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0]  ]
+            
+            #predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0]  ]
             #predicted_edges = [ edges[e] for e in e_prob.argsort()[-n:][::-1]]
-            print("Precision, Recall: {}, {}".format(precision,recall))
+            predicted_edges = compute_route_greedy(n,edges,e_prob)
+            NN_edges        = compute_route_nearest_neighbor(n,edges,W)
+
+            true_cost       = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in true_edges or (j,i) in true_edges ])
+            predicted_cost  = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in predicted_edges or (j,i) in predicted_edges ])
+            NN_cost         = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in NN_edges or (j,i) in NN_edges ])
+            deviation       = (predicted_cost-true_cost) / true_cost
+            deviation_NN    = (NN_cost-true_cost) / true_cost
+            
+            #print("{} Predicted edges".format(len(predicted_edges)))
+            print("Route cost deviation: {dev:.3f}%".format(dev = 100*deviation))
+            print("NN Route cost deviation: {dev:.3f}%".format(dev = 100*deviation_NN))
+            #print("Precision, Recall: {}, {}".format(precision,recall))
 
             nodes[:,:] += 1.25*np.array([inst_i//k,inst_i%k]).astype(float)
 
@@ -138,7 +220,7 @@ if __name__ == '__main__':
                x1,x2 = nodes[i,0],nodes[j,0]
                y1,y2 = nodes[i,1],nodes[j,1]
                #if (i,j) not in true_edges:
-               plt.plot([x1,x2],[y1,y2], color=colors[inst_i%len(colors)], linestyle='-', linewidth=1.5, zorder=0)
+               plt.plot([x1,x2],[y1,y2], color=colors[inst_i%len(colors)], linestyle='-', linewidth=1, zorder=0)
                #end
             #end
 
@@ -167,5 +249,4 @@ if __name__ == '__main__':
         #plt.savefig('paper/figures/training-inst-examples.pdf', format='pdf')
 
     #end
-
 #end

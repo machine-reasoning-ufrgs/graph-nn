@@ -159,7 +159,7 @@ def build_network(d):
         degrees, given the probability distribution over edges.
     """
     expected_degrees = tf.matmul(gnn.matrix_placeholders['M'], tf.expand_dims(E_prob,1), adjoint_a=True)
-    degree_loss = tf.losses.mean_squared_error(E_prob, tf.scalar_mul(4,tf.ones_like(E_prob)))
+    degree_loss = tf.losses.mean_squared_error(E_prob, tf.scalar_mul(2,tf.ones_like(E_prob)))
 
     # Compute precision, recall, true negative rate and accuracy in terms of selected edges
     true_positives = tf.reduce_sum(
@@ -301,7 +301,7 @@ def build_network(d):
 
 if __name__ == '__main__':
     
-    create_datasets     = False
+    create_datasets     = True
     load_checkpoints    = False
     save_checkpoints    = True
 
@@ -313,7 +313,7 @@ if __name__ == '__main__':
     loss_type           = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ['cost','edges'] else 'edges'
 
     if create_datasets:
-        nmin, nmax = 20, 40
+        nmin, nmax = 20, 30
         samples = batch_size*batches_per_epoch
         print("Creating {} train instances...".format(samples))
         create_dataset_metric(nmin, nmax, path="TSP-train", samples=samples, bins=10**3)
@@ -451,21 +451,21 @@ if __name__ == '__main__':
                 for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), batches_per_epoch):
 
                     # Get features, problem sizes, labels for this batch
-                    Ma_all, Mw_all, n_vertices, n_edges, route_edges, route_cost = batch
+                    Ma_all, Mw_all, n_vertices, n_edges, route_edges = batch
 
                     # Convert to quiver format
-                    M, W = to_quiver(Ma_all, Mw_all)
+                    M, W, R = to_quiver(Ma_all, Mw_all)
 
-                    test_cost_loss[batch_i], test_edges_loss[batch_i], test_degree_loss[batch_i], test_precision[batch_i], test_recall[batch_i], test_true_negative_rate[batch_i], test_accuracy[batch_i], test_tacc[batch_i], test_cost_deviation[batch_i], e_prob = sess.run(
+                    train_cost_loss[batch_i], train_edges_loss[batch_i], train_degree_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], train_cost_deviation[batch_i], e_prob = sess.run(
                         [ GNN['cost_loss'], GNN['edges_loss'], GNN['degree_loss'], GNN['precision'], GNN['recall'], GNN['true_negative_rate'], GNN['accuracy'], GNN['top_edges_acc'], GNN['cost_deviation'],  GNN["E_prob"] ],
                         feed_dict = {
                             GNN["gnn"].matrix_placeholders["M"]:    M,
                             GNN["gnn"].matrix_placeholders["W"]:    W,
+                            GNN["gnn"].matrix_placeholders["R"]:    R,
                             GNN["n_vertices"]:                      n_vertices,
                             GNN["n_edges"]:                         n_edges,
                             GNN["gnn"].time_steps:                  time_steps,
-                            GNN["route_edges"]:                     route_edges,
-                            GNN["route_cost"]:                      route_cost,
+                            GNN["route_edges"]:                     route_edges
                         }
                     )
                 #end
