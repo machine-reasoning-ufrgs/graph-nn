@@ -72,8 +72,8 @@ def build_network(d):
 
     # Define E_vote, which will compute one logit for each edge
     E_vote_MLP = Mlp(
-        layer_sizes = [ d for _ in range(2) ],
-        activations = [ tf.nn.relu for _ in range(2) ],
+        layer_sizes = [ d for _ in range(3) ],
+        activations = [ tf.nn.relu for _ in range(3) ],
         output_size = 1,
         name = "E_vote",
         name_internal_layers = True,
@@ -104,9 +104,16 @@ def build_network(d):
     E_prob = tf.sigmoid(E_vote)
 
     # Compute a 'cost' loss, which is the mean squared error between the predicted route cost and the actual route cost
+    #cost_loss = tf.square(
+    #    tf.subtract(
+    #        tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), E_prob)),
+    #        tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges)
+    #        )
+    #    )
+    #)
     cost_loss = tf.square(
         tf.subtract(
-            tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), E_prob)),
+            tf.reduce_sum(E_prob),
             tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges)
             )
         )
@@ -114,7 +121,7 @@ def build_network(d):
 
     # Define cost_deviation as the relative deviation between the predicted
     # cost and the true route cost
-    predicted_cost  = tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), tf.round(E_prob)))
+    predicted_cost  = tf.reduce_sum(E_prob)#tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), tf.round(E_prob)))
     true_cost       = tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges))
     cost_deviation  = tf.reduce_mean(
         tf.div(
@@ -309,14 +316,16 @@ if __name__ == '__main__':
     batches_per_epoch   = 128
     time_steps          = 25
     loss_type           = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ['cost','edges'] else 'edges'
+    bins                = 10**6
 
     if create_datasets:
         nmin, nmax = 20, 40
+        conn_min, conn_max = 0.25, 1.0
         samples = batch_size*batches_per_epoch
         print("Creating {} train instances...".format(samples))
-        create_dataset_metric(nmin, nmax, path="TSP-train", samples=samples, bins=10**6, connectivity = 0.5)
+        create_dataset_metric(nmin, nmax, conn_min, conn_max, path="TSP-train", samples=samples, bins=bins)
         print("\nCreating {} test instances...".format(samples))
-        create_dataset_metric(nmin, nmax, path="TSP-test", samples=samples, bins=10**6, connectivity = 0.5)
+        create_dataset_metric(nmin, nmax, conn_min, conn_max, path="TSP-test", samples=samples, bins=bins)
         print('\n')
     #end
 

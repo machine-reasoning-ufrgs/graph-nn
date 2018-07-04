@@ -1,5 +1,4 @@
 
-
 import sys, os
 import numpy as np
 import random
@@ -11,12 +10,16 @@ from ortools.constraint_solver import pywrapcp          # For solving TSP instan
 from ortools.constraint_solver import routing_enums_pb2 # For solving TSP instances
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
+from concorde.tsp import TSPSolver
+from redirector import Redirector
+
+STDOUT = 1
+STDERR = 2
 
 class InstanceLoader(object):
 
     def __init__(self,path):
         self.path = path
-
         self.filenames = [ path + '/' + x for x in os.listdir(path) ]
         self.reset()
     #end
@@ -80,7 +83,7 @@ class InstanceLoader(object):
     #end
 #end
 
-def solve(Ma, Mw):
+def solve_old(Ma, Mw):
     """
         Find the optimal TSP tour given vertex adjacencies given by the binary
         matrix Ma and edge weights given by the real-valued matrix W
@@ -89,7 +92,7 @@ def solve(Ma, Mw):
     n = Ma.shape[0]
 
     # Create a routing model
-    routing = pywrapcp.RoutingModel(n, 1, 0)
+    routing = pywrapcp.RoutingModel(n, 1)
 
     def dist(i,j):
         return Mw[i,j]
@@ -120,6 +123,21 @@ def solve(Ma, Mw):
     return list(route_generator()) if assignment is not None else []
 #end
 
+def solve(Ma, Mw):
+
+    write_graph(Ma,Mw,[],'tmp',int_weights=True)
+    redirector_stdout = Redirector(fd=STDOUT)
+    redirector_stderr = Redirector(fd=STDERR)
+    redirector_stderr.start()
+    redirector_stdout.start()
+    solver = TSPSolver.from_tspfile('tmp')
+    solution = solver.solve(verbose=False)
+    redirector_stderr.stop()
+    redirector_stdout.stop()
+
+    return solution.tour if solution.found_tour else []
+#end
+
 def create_graph_metric(n, bins, connectivity=1):
     
     # Select 'n' 2D points in the unit square
@@ -133,6 +151,7 @@ def create_graph_metric(n, bins, connectivity=1):
             Ma[i,j] = Ma[j,i]
         #end
     #end
+    
     # Build a weight matrix
     Mw = np.zeros((n,n))
     for i in range(n):
@@ -142,34 +161,79 @@ def create_graph_metric(n, bins, connectivity=1):
         #end
     #end
 
+    # Add huge costs to inexistent edges to simulate a disconnected instance
+    for i in range(n):
+        for j in range(n):
+            if Ma[i,j] == 0:
+                Mw[i,j] = n+1
+
     # Rescale and round weights, quantizing them into 'bins' integer bins
     Mw = np.round(bins * Mw)
 
     # Solve
-    solution = solve(Ma,Mw)
+    route = solve(Ma,Mw)
+
+    # Check if route contains edges which are not in the graph and add them
+    for (i,j) in [ (i,j) for (i,j) in zip(route,route[1:]+route[0:1]) if Ma[i,j] == 0 ]:
+        Ma[i,j] = Ma[j,i] = 1
+        Mw[i,j] = Mw[j,i] = 1
+    #end
+
+    # Remove huge costs from inexistent edges to simulate a disconnected instance
+    for i in range(n):
+        for j in range(n):
+            if Ma[i,j] == 0:
+                Mw[i,j] = 0
 
     # Rescale weights such that they are all ∈ [0,1]
     Mw = Mw / bins
 
-    return np.triu(Ma), Mw, ([] if solution is None else solution), nodes
+    return np.triu(Ma), Mw, ([] if route is None else route), nodes
 #end
 
-def write_graph(Ma, Mw, route, filepath):
+def write_graph(Ma, Mw, route, filepath, int_weights=False):
     with open(filepath,"w") as out:
-        # Write header 'p |V| |E| \n route'
-        out.write("p {} {}\n{}\n".format(Ma.shape[0], len(np.nonzero(Ma)[0]), ' '.join([str(x) for x in route])))
 
-        # Write edges
+        n, m = Ma.shape[0], len(np.nonzero(Ma)[0])
+        
+        out.write('TYPE : TSP\n')
+
+        out.write('DIMENSION: {n}\n'.format(n = n))
+
+        out.write('EDGE_DATA_FORMAT: EDGE_LIST\n')
+        out.write('EDGE_WEIGHT_TYPE: EXPLICIT\n')
+        out.write('EDGE_WEIGHT_FORMAT: FULL_MATRIX \n')
+        
+        # List edges in the (generally not complete) graph
+        out.write('EDGE_DATA_SECTION\n')
         for (i,j) in zip(list(np.nonzero(Ma))[0], list(np.nonzero(Ma))[1]):
-            out.write("{} {} {}\n".format(i,j,Mw[i,j]))
+            out.write("{} {}\n".format(i,j))
         #end
+        out.write('-1\n')
+
+        # Write edge weights as a complete matrix
+        out.write('EDGE_WEIGHT_SECTION\n')
+        for i in range(n):
+            if int_weights:
+                out.write('\t'.join([ str(int(Mw[i,j])) for j in range(n)]))
+            else:
+                out.write('\t'.join([ str(float(Mw[i,j])) for j in range(n)]))
+            #end
+            out.write('\n')
+        #end
+
+        # Write route as a concorde commentary
+        out.write('TOUR_SECTION\n')
+        out.write('{}\n'.format(' '.join([str(x) for x in route])))
+
+        out.write('EOF\n')
     #end
 #end
 
-def read_graph(filepath):
+def read_graph_old(filepath):
     with open(filepath,"r") as f:
-        n, m = [ int(x) for x in f.readline().split()[1:]]
-        route = [ int(x) for x in f.readline().split() ]
+        n, m = [ int(x) for x in f.readline().split()]
+        route = [ int(x) for x in f.readline()[1:].split() ]
         Ma = np.zeros((n,n),dtype=int)
         Mw = np.zeros((n,n),dtype=float)
         for edge in range(m):
@@ -182,7 +246,39 @@ def read_graph(filepath):
     return Ma,Mw,route
 #end
 
-def create_dataset_metric(nmin, nmax, path, bins=10, connectivity=1, samples=1000):
+def read_graph(filepath):
+    with open(filepath,"r") as f:
+
+        line = ''
+
+        while 'DIMENSION' not in line: line = f.readline();
+
+        n = int(line.split()[1])
+        Ma = np.zeros((n,n),dtype=int)
+        Mw = np.zeros((n,n),dtype=float)
+
+        while 'EDGE_DATA_SECTION' not in line: line = f.readline();
+        line = f.readline()
+        
+        while '-1' not in line:
+            i,j = [ int(x) for x in line.split() ]
+            Ma[i,j] = 1
+            line = f.readline()
+        #end
+        line = f.readline()
+
+        for i in range(n):
+            Mw[i,:] = [ float(x) for x in f.readline().split() ]
+        #end
+        line = f.readline()
+
+        route = [ int(x) for x in f.readline().split() ]
+
+    #end
+    return Ma,Mw,route
+#end
+
+def create_dataset_metric(nmin, nmax, conn_min, conn_max, path, bins=10**6, connectivity=1, samples=1000):
 
     if not os.path.exists(path):
         os.makedirs(path)
@@ -192,9 +288,9 @@ def create_dataset_metric(nmin, nmax, path, bins=10, connectivity=1, samples=100
     for i in range(samples):
 
         solution = []
-
         while solution == []:
             n = np.random.randint(nmin,nmax)
+            connectivity = np.random.uniform(conn_min,conn_max)
             Ma,Mw,solution,_ = create_graph_metric(n,bins,connectivity)
         #end
 

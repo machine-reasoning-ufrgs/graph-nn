@@ -14,6 +14,7 @@ from tsp import build_network
 from matplotlib import pyplot as plt
 from matplotlib.colors import hsv_to_rgb
 from matplotlib import colors as mcolors
+from matplotlib import cm
 import itertools
 
 def test_multiple_TSP_solutions():
@@ -87,7 +88,12 @@ def compute_route_greedy(n, edges, e_prob):
 
         # Choose adjacency with highest probability
         adjacencies = [ edges[e] for e in e_prob.argsort()[::-1] if (edges[e][0] == v and visited[edges[e][1]] == 0) or (edges[e][1] == v and visited[edges[e][0]] == 0) ]
-        e = adjacencies[0]
+        
+        if len(adjacencies) > 0:
+            e = adjacencies[0]
+        else:
+            return []
+        #end
 
         if e[0] == v:
             v2 = e[1]
@@ -98,6 +104,8 @@ def compute_route_greedy(n, edges, e_prob):
         route.append(e)
         v = v2
     #end
+
+    route.append((v,init))
 
     return route
 #end
@@ -121,7 +129,13 @@ def compute_route_nearest_neighbor(n, edges, W):
 
         # Choose adjacency with highest probability
         adjacencies = [ edges[e] for e in W[:,0].argsort() if (edges[e][0] == v and visited[edges[e][1]] == 0) or (edges[e][1] == v and visited[edges[e][0]] == 0) ]
-        e = adjacencies[0]
+        
+
+        if len(adjacencies) > 0:
+            e = adjacencies[0]
+        else:
+            return []
+        #end
 
         if e[0] == v:
             v2 = e[1]
@@ -132,6 +146,8 @@ def compute_route_nearest_neighbor(n, edges, W):
         route.append(e)
         v = v2
     #end
+
+    route.append((v,init))
 
     return route
 #end
@@ -161,19 +177,29 @@ if __name__ == '__main__':
         # Run k² tests
         n = 20
         bins = 10**6
+        connectivity = 1
+
+        #normalize item number values to colormap
+        norm = mcolors.Normalize(vmin=0, vmax=k**2)
+
+        # Create metric TSP instance
+        route = []
+        while route == []:
+            Ma,Mw,route,nodes = create_graph_metric(n,bins,connectivity)
+        #end
+
+        # Compute list of edges (as 2-uples of node indices)
+        edges = list(zip(np.nonzero(Ma)[0], np.nonzero(Ma)[1]))
+
+        # Get edges mask
+        route_edges = get_edges_mask(Ma,route)
+
+        # Convert to 'quiver' format
+        M, W, R = to_quiver(Ma,Mw)
+
         for inst_i in range(k**2):
 
-            # Create metric TSP instance
-            Ma, Mw, route, nodes = create_graph_metric(n,bins,connectivity=0.5)
-
-            # Compute list of edges (as 2-uples of node indices)
-            edges = list(zip(np.nonzero(Ma)[0], np.nonzero(Ma)[1]))
-
-            # Get edges mask
-            route_edges = get_edges_mask(Ma,route)
-
-            # Convert to 'quiver' format
-            M, W, R = to_quiver(Ma,Mw)
+            time_steps = 25 + int((50-25)*inst_i/k**2)
 
             # Get edges' probabilities
             e_prob, precision, recall = sess.run(
@@ -181,7 +207,7 @@ if __name__ == '__main__':
                 feed_dict = {
                     GNN["gnn"].matrix_placeholders["M"]:    M,
                     GNN["gnn"].matrix_placeholders["W"]:    W,
-                    GNN["gnn"].matrix_placeholders["R"]:    R,
+                    #GNN["gnn"].matrix_placeholders["R"]:    R,
                     GNN["n_vertices"]:                      [Ma.shape[0]],
                     GNN["n_edges"]:                         [len(edges)],
                     GNN["gnn"].time_steps:                  time_steps,
@@ -202,38 +228,37 @@ if __name__ == '__main__':
             deviation       = (predicted_cost-true_cost) / true_cost
             #deviation_NN    = (NN_cost-true_cost) / true_cost
             
-            #print("{} Predicted edges".format(len(predicted_edges)))
             print("Route cost deviation: {dev:.3f}%".format(dev = 100*deviation))
             #print("NN Route cost deviation: {dev:.3f}%".format(dev = 100*deviation_NN))
-            #print("Precision, Recall: {}, {}".format(precision,recall))
+            print("Precision, Recall: {}, {}".format(precision,recall))
+            print('\n')
 
-            nodes[:,:] += 1.25*np.array([inst_i//k,inst_i%k]).astype(float)
+            nodes_ = nodes + 1.25*np.array([inst_i%k,inst_i//k]).astype(float)
 
             colors = [c for c in mcolors.BASE_COLORS.keys() if c != 'w']
 
-            ### Draw predicted edges
-            #for (i,j) in predicted_edges:
-            #   x1,x2 = nodes[i,0],nodes[j,0]
-            #   y1,y2 = nodes[i,1],nodes[j,1]
-            #   #if (i,j) not in true_edges:
-            #   plt.plot([x1,x2],[y1,y2], color=colors[inst_i%len(colors)], linestyle='-', linewidth=1, zorder=0)
-            #   #end
-            ##end
-
-            # Draw true edges
-            for (i,j) in true_edges:
-                x1,x2 = nodes[i,0],nodes[j,0]
-                y1,y2 = nodes[i,1],nodes[j,1]
-            
-                if (i,j) in predicted_edges or (j,i) in predicted_edges:
-                   plt.plot([x1,x2],[y1,y2], 'b-')
-                else:
-                   plt.plot([x1,x2],[y1,y2], 'r--')
-                #end
+            # Draw predicted edges
+            for e,(i,j) in enumerate(predicted_edges):#enumerate(edges):
+               x1,x2 = nodes_[i,0],nodes_[j,0]
+               y1,y2 = nodes_[i,1],nodes_[j,1]
+               plt.plot([x1,x2],[y1,y2], color = cm.jet(norm(inst_i)) , linestyle='-', linewidth=1, zorder=0)
+               #end
             #end
 
+            ## Draw true edges
+            #for (i,j) in true_edges:
+            #    x1,x2 = nodes[i,0],nodes[j,0]
+            #    y1,y2 = nodes[i,1],nodes[j,1]
+            #
+            #    if (i,j) in predicted_edges or (j,i) in predicted_edges:
+            #       plt.plot([x1,x2],[y1,y2], 'b-')
+            #    else:
+            #       plt.plot([x1,x2],[y1,y2], 'r--')
+            #    #end
+            ##end
+
             # Draw nodes
-            plt.scatter(x=nodes[:,0], y=nodes[:,1], s=20*np.ones(n), facecolors='w', edgecolors='black', zorder=1)
+            plt.scatter(x=nodes_[:,0], y=nodes_[:,1], s=5*np.ones(n), facecolors='w', edgecolors='black', zorder=1)
 
         #end
 
