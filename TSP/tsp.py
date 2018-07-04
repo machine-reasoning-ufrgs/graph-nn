@@ -37,9 +37,7 @@ def build_network(d):
             # M is a E×V adjacency matrix connecting each edge to the vertices it is connected to
             "M": ("E","V"),
             # W is a column matrix of shape |E|×1 where W[i,1] is the weight of the i-th edge
-            "W": ("E",1),
-            # R is a column matrix of shape |E|×1 where R[i,1] is the (normalized) rank of the i-th edge (used for breaking ties)
-            "R": ("E",1)
+            "W": ("E",1)
         },
         {
             # Vmsg is a MLP which computes messages from vertex embeddings to edge embeddings
@@ -374,7 +372,7 @@ if __name__ == '__main__':
                         feed_dict = {
                             GNN["gnn"].matrix_placeholders["M"]:    M,
                             GNN["gnn"].matrix_placeholders["W"]:    W,
-                            GNN["gnn"].matrix_placeholders["R"]:    R,
+                            #GNN["gnn"].matrix_placeholders["R"]:    R,
                             GNN["n_vertices"]:                      n_vertices,
                             GNN["n_edges"]:                         n_edges,
                             GNN["gnn"].time_steps:                  time_steps,
@@ -461,7 +459,7 @@ if __name__ == '__main__':
                         feed_dict = {
                             GNN["gnn"].matrix_placeholders["M"]:    M,
                             GNN["gnn"].matrix_placeholders["W"]:    W,
-                            GNN["gnn"].matrix_placeholders["R"]:    R,
+                            #GNN["gnn"].matrix_placeholders["R"]:    R,
                             GNN["n_vertices"]:                      n_vertices,
                             GNN["n_edges"]:                         n_edges,
                             GNN["gnn"].time_steps:                  time_steps,
