@@ -99,8 +99,6 @@ def compute_route_greedy(n, edges, e_prob):
         v = v2
     #end
 
-    route.append((v,init))
-
     return route
 #end
 
@@ -122,7 +120,7 @@ def compute_route_nearest_neighbor(n, edges, W):
         visited[v] = 1
 
         # Choose adjacency with highest probability
-        adjacencies = [ edges[e] for e in W[:,0].argsort()[::-1] if (edges[e][0] == v and visited[edges[e][1]] == 0) or (edges[e][1] == v and visited[edges[e][0]] == 0) ]
+        adjacencies = [ edges[e] for e in W[:,0].argsort() if (edges[e][0] == v and visited[edges[e][1]] == 0) or (edges[e][1] == v and visited[edges[e][0]] == 0) ]
         e = adjacencies[0]
 
         if e[0] == v:
@@ -134,8 +132,6 @@ def compute_route_nearest_neighbor(n, edges, W):
         route.append(e)
         v = v2
     #end
-
-    route.append((v,init))
 
     return route
 #end
@@ -163,12 +159,12 @@ if __name__ == '__main__':
 
         k = 3
         # Run k² tests
-        n = 100
-        bins = 10**3
+        n = 20
+        bins = 10**6
         for inst_i in range(k**2):
 
             # Create metric TSP instance
-            Ma, Mw, route, nodes = create_graph_metric(n,bins)
+            Ma, Mw, route, nodes = create_graph_metric(n,bins,connectivity=0.5)
 
             # Compute list of edges (as 2-uples of node indices)
             edges = list(zip(np.nonzero(Ma)[0], np.nonzero(Ma)[1]))
@@ -195,52 +191,49 @@ if __name__ == '__main__':
 
             true_edges = list(zip(route,route[1:]+route[:1])) + list(zip(route[1:]+route[:1],route))
             
-            #predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0]  ]
+            predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0]  ]
             #predicted_edges = [ edges[e] for e in e_prob.argsort()[-n:][::-1]]
-            predicted_edges = compute_route_greedy(n,edges,e_prob)
-            NN_edges        = compute_route_nearest_neighbor(n,edges,W)
+            #predicted_edges = compute_route_greedy(n,edges,e_prob)
+            #NN_edges        = compute_route_nearest_neighbor(n,edges,W)
 
             true_cost       = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in true_edges or (j,i) in true_edges ])
             predicted_cost  = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in predicted_edges or (j,i) in predicted_edges ])
-            NN_cost         = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in NN_edges or (j,i) in NN_edges ])
+            #NN_cost         = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in NN_edges or (j,i) in NN_edges ])
             deviation       = (predicted_cost-true_cost) / true_cost
-            deviation_NN    = (NN_cost-true_cost) / true_cost
+            #deviation_NN    = (NN_cost-true_cost) / true_cost
             
             #print("{} Predicted edges".format(len(predicted_edges)))
             print("Route cost deviation: {dev:.3f}%".format(dev = 100*deviation))
-            print("NN Route cost deviation: {dev:.3f}%".format(dev = 100*deviation_NN))
+            #print("NN Route cost deviation: {dev:.3f}%".format(dev = 100*deviation_NN))
             #print("Precision, Recall: {}, {}".format(precision,recall))
 
             nodes[:,:] += 1.25*np.array([inst_i//k,inst_i%k]).astype(float)
 
             colors = [c for c in mcolors.BASE_COLORS.keys() if c != 'w']
 
-            ## Draw predicted edges
-            for (i,j) in predicted_edges:
-               x1,x2 = nodes[i,0],nodes[j,0]
-               y1,y2 = nodes[i,1],nodes[j,1]
-               #if (i,j) not in true_edges:
-               plt.plot([x1,x2],[y1,y2], color=colors[inst_i%len(colors)], linestyle='-', linewidth=1, zorder=0)
-               #end
-            #end
-
-            ## Draw true edges
-            #for (i,j) in true_edges:
-            #    if i < j: continue;
-            #    x1,x2 = nodes[i,0],nodes[j,0]
-            #    y1,y2 = nodes[i,1],nodes[j,1]
-            #
-            #    if (i,j) in predicted_edges:
-            #       plt.plot([x1,x2],[y1,y2], 'b-')
-            #    else:
-            #       plt.plot([x1,x2],[y1,y2], 'r--')
-            #    #end
-            #
-            #    #plt.plot([x1,x2],[y1,y2], color=['red','green','blue','black'][inst_i], linestyle='-', linewidth=1.5, zorder=0)
+            ### Draw predicted edges
+            #for (i,j) in predicted_edges:
+            #   x1,x2 = nodes[i,0],nodes[j,0]
+            #   y1,y2 = nodes[i,1],nodes[j,1]
+            #   #if (i,j) not in true_edges:
+            #   plt.plot([x1,x2],[y1,y2], color=colors[inst_i%len(colors)], linestyle='-', linewidth=1, zorder=0)
+            #   #end
             ##end
 
+            # Draw true edges
+            for (i,j) in true_edges:
+                x1,x2 = nodes[i,0],nodes[j,0]
+                y1,y2 = nodes[i,1],nodes[j,1]
+            
+                if (i,j) in predicted_edges or (j,i) in predicted_edges:
+                   plt.plot([x1,x2],[y1,y2], 'b-')
+                else:
+                   plt.plot([x1,x2],[y1,y2], 'r--')
+                #end
+            #end
+
             # Draw nodes
-            #plt.scatter(x=nodes[:,0], y=nodes[:,1], s=20*np.ones(n), facecolors='w', edgecolors='black', zorder=1)
+            plt.scatter(x=nodes[:,0], y=nodes[:,1], s=20*np.ones(n), facecolors='w', edgecolors='black', zorder=1)
 
         #end
 

@@ -313,7 +313,7 @@ if __name__ == '__main__':
     loss_type           = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ['cost','edges'] else 'edges'
 
     if create_datasets:
-        nmin, nmax = 20, 30
+        nmin, nmax = 20, 40
         samples = batch_size*batches_per_epoch
         print("Creating {} train instances...".format(samples))
         create_dataset_metric(nmin, nmax, path="TSP-train", samples=samples, bins=10**6, connectivity = 0.5)
