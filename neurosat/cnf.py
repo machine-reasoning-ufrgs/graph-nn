@@ -1,6 +1,7 @@
 import pycosat
 import copy
 import numpy as np
+import os
 
 class CNF(object):
 
@@ -104,6 +105,25 @@ class BatchCNF(object):
     self.clauses = clauses
     self.sat = sat
   #end
+  
+  def get_dense_matrix(self):
+    M = np.zeros( (2*self.total_n, self.total_m), dtype=np.float32 )
+    n_cells = sum([ len(clause) for clause in self.clauses ])
+    cell = 0
+    for (j,clause) in enumerate(self.clauses):
+      for literal in clause:
+        i = int(abs(literal) - 1)
+        p = np.sign(literal)
+        if p == +1:
+          M[i,j] = 1
+        elif p == -1:
+          M[self.total_n + i, j] = 1
+        #end
+        cell += 1
+      #end for literal
+    #end for j,clause
+    return M
+  #end get_dense_matrix
 
   def get_sparse_matrix(self):
     """
@@ -171,9 +191,33 @@ def create_critical_dataset( n = 40, samples = 512, path = "critical_instances" 
   #end for
 #end create_critical_dataset
 
+def ensure_datasets( make_critical = False ):
+  idirs = [ "instances", "instances/sat", "instances/unsat" ]
+  if not all( map( os.path.isdir, idirs ) ):
+    for d in idirs:
+      os.makedirs( d )
+    #end for
+    create_dataset( 10, 40, 25600, path = idirs[0] )
+  #end if
+  tdirs = [ "test-instances", "test-instances/sat", "test-instances/unsat" ]
+  if not all( map( os.path.isdir, tdirs ) ):
+    for d in tdirs:
+      os.makedirs( d )
+    #end for
+    create_dataset( 40, 40, 512, path = tdirs[0])
+  #end if
+  if make_critical:
+    c40dir = "critical-instances-40"
+    if not os.path.isdir( c40dir ):
+      os.makedirs( c40dir )
+      create_critical_dataset( 40, 512, c40dir )
+    #end if
+    c80dir = "critical-instances-80"
+    if not os.path.isdir( c80dir ):
+      os.makedirs( c80dir )
+      create_critical_dataset( 80, 512, c80dir )
+    #end if
+#end ensure_datasets
+
 if __name__ == '__main__':
-  create_dataset( 10, 40, 25600, path = "instances" )
-  create_dataset( 40, 40, 512, path = "test_instances" )
-  create_critical_dataset( 40, 512, "critical_instances_40" )
-  create_critical_dataset( 80, 512, "critical_instances_80" )
-#end
+  ensure_datasets()

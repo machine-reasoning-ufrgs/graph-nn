@@ -5,10 +5,6 @@ from graphnn import GraphNN
 from mlp import Mlp
 from cnf import CNF
 
-def sigmoid( x, derivative = False ):
-  return x*(1-x) if derivative else 1/(1+np.exp(-x))
-#end sigmoid
-
 def build_neurosat(d):
 
   # Hyperparameters

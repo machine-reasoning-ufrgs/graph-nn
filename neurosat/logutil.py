@@ -4,24 +4,28 @@ import instance_loader
 import numpy as np
 from util import timestamp, memory_usage
 
+def sigmoid( x, derivative = False ):
+  return x*(1-x) if derivative else 1/(1+np.exp(-x))
+#end sigmoid
+
 def run_and_log_batch( sess, solver, epoch, b, batch, time_steps, train = True ):
   sat = list( 1 if sat else 0 for sat in batch.sat )
   # Build feed_dict
   feed_dict = {
-    solver.time_steps: time_steps,
-    solver.M: batch.get_sparse_matrix(),
-    solver.instance_SAT: np.array( sat ),
-    solver.num_vars_on_instance: batch.n
+    solver["gnn"].time_steps: time_steps,
+    solver["gnn"].matrix_placeholders["M"]: batch.get_dense_matrix(),
+    solver["instance_SAT"]: np.array( sat ),
+    solver["num_vars_on_instance"]: batch.n
   }
   # Run session
   if train:
     _, pred_SAT, loss_val, accuracy_val = sess.run(
-        [ solver.train_step, solver.predicted_SAT, solver.loss, solver.accuracy ],
+        [ solver["train_step"], solver["predicted_SAT"], solver["loss"], solver["accuracy"] ],
         feed_dict = feed_dict
     )
   else:
     pred_SAT, loss_val, accuracy_val = sess.run(
-        [ solver.predicted_SAT, solver.loss, solver.accuracy ],
+        [ solver["predicted_SAT"], solver["loss"], solver["accuracy"] ],
         feed_dict = feed_dict
     )
   #end if
