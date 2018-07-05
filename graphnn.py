@@ -182,9 +182,12 @@ class GraphNN(object):
 	#end _init_util_vars
 	
 	def _run(self):
+
+        denom = tf.sqrt(tf.cast(d, tf.float32))
+
 		cell_state = {}
 		for v, init in self._tf_inits.items():
-			cell_h0 = tf.tile( init, [ self.num_vars[v], 1 ] )
+			cell_h0 = tf.tile( tf.div(init,denom), [ self.num_vars[v], 1 ] )
 			cell_c0 = tf.zeros_like( cell_h0, dtype = self.float_dtype )
 			cell_state[v] = tf.contrib.rnn.LSTMStateTuple( h = cell_h0, c = cell_c0 )
 			if v in self.none_ones:
