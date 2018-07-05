@@ -104,16 +104,9 @@ def build_network(d):
     E_prob = tf.sigmoid(E_vote)
 
     # Compute a 'cost' loss, which is the mean squared error between the predicted route cost and the actual route cost
-    #cost_loss = tf.square(
-    #    tf.subtract(
-    #        tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), E_prob)),
-    #        tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges)
-    #        )
-    #    )
-    #)
     cost_loss = tf.square(
         tf.subtract(
-            tf.reduce_sum(E_prob),
+            tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), E_prob)),
             tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges)
             )
         )
@@ -121,7 +114,7 @@ def build_network(d):
 
     # Define cost_deviation as the relative deviation between the predicted
     # cost and the true route cost
-    predicted_cost  = tf.reduce_sum(E_prob)#tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), tf.round(E_prob)))
+    predicted_cost  = tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), tf.round(E_prob)))
     true_cost       = tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges))
     cost_deviation  = tf.reduce_mean(
         tf.div(
@@ -306,7 +299,7 @@ def build_network(d):
 
 if __name__ == '__main__':
     
-    create_datasets     = True
+    create_datasets     = False
     load_checkpoints    = False
     save_checkpoints    = True
 

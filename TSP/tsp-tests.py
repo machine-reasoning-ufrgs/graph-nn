@@ -175,7 +175,7 @@ if __name__ == '__main__':
 
         k = 3
         # Run k² tests
-        n = 20
+        n = 40
         bins = 10**6
         connectivity = 1
 
@@ -199,7 +199,8 @@ if __name__ == '__main__':
 
         for inst_i in range(k**2):
 
-            time_steps = 25 + int((50-25)*inst_i/k**2)
+            time_steps = 25 + 5*(inst_i-k**2//2)
+            print("Timesteps: {}".format(time_steps))
 
             # Get edges' probabilities
             e_prob, precision, recall = sess.run(
@@ -217,28 +218,26 @@ if __name__ == '__main__':
 
             true_edges = list(zip(route,route[1:]+route[:1])) + list(zip(route[1:]+route[:1],route))
             
-            predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0]  ]
-            #predicted_edges = [ edges[e] for e in e_prob.argsort()[-n:][::-1]]
+            #predicted_edges = [ edges[e] for e in np.nonzero(np.round(e_prob))[0]  ]
+            predicted_edges = [ edges[e] for e in e_prob.argsort()[-n:][::-1]]
             #predicted_edges = compute_route_greedy(n,edges,e_prob)
-            #NN_edges        = compute_route_nearest_neighbor(n,edges,W)
+            NN_edges        = compute_route_nearest_neighbor(n,edges,W)
 
             true_cost       = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in true_edges or (j,i) in true_edges ])
             predicted_cost  = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in predicted_edges or (j,i) in predicted_edges ])
-            #NN_cost         = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in NN_edges or (j,i) in NN_edges ])
+            NN_cost         = np.sum([ W[e,0] for e,(i,j) in enumerate(edges) if (i,j) in NN_edges or (j,i) in NN_edges ])
             deviation       = (predicted_cost-true_cost) / true_cost
-            #deviation_NN    = (NN_cost-true_cost) / true_cost
+            deviation_NN    = (NN_cost-true_cost) / true_cost
             
             print("Route cost deviation: {dev:.3f}%".format(dev = 100*deviation))
-            #print("NN Route cost deviation: {dev:.3f}%".format(dev = 100*deviation_NN))
+            print("NN Route cost deviation: {dev:.3f}%".format(dev = 100*deviation_NN))
             print("Precision, Recall: {}, {}".format(precision,recall))
             print('\n')
 
             nodes_ = nodes + 1.25*np.array([inst_i%k,inst_i//k]).astype(float)
 
-            colors = [c for c in mcolors.BASE_COLORS.keys() if c != 'w']
-
             # Draw predicted edges
-            for e,(i,j) in enumerate(predicted_edges):#enumerate(edges):
+            for e,(i,j) in enumerate(predicted_edges):
                x1,x2 = nodes_[i,0],nodes_[j,0]
                y1,y2 = nodes_[i,1],nodes_[j,1]
                plt.plot([x1,x2],[y1,y2], color = cm.jet(norm(inst_i)) , linestyle='-', linewidth=1, zorder=0)
