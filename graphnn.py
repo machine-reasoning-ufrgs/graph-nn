@@ -135,7 +135,7 @@ class GraphNN(object):
     # Init embeddings
     self._tf_inits = {}
     for v, d in self.var.items():
-      self._tf_inits[v] = tf.get_variable( "{}_init".format( v ), [ 1, d ], dtype = self.float_dtype )
+      self._tf_inits[v] = tf.get_variable( name="{}_init".format(v), initializer=tf.random_normal([1,d]), dtype = self.float_dtype )
     #end for
     # Init LSTM cells
     self._tf_cells = {}
