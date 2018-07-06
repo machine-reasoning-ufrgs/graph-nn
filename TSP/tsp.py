@@ -266,8 +266,8 @@ if __name__ == '__main__':
     d                       = 128
     epochs                  = 100
     batch_size              = 32
-    train_batches_per_epoch = 2
-    test_batches_per_epoch  = 2
+    train_batches_per_epoch = 128
+    test_batches_per_epoch  = 32
     time_steps              = 25
     bins                    = 10**6
 
@@ -276,11 +276,12 @@ if __name__ == '__main__':
     if create_datasets:
         nmin, nmax = 20, 40
         conn_min, conn_max = 0.25, 1.0
-        samples = batch_size*batches_per_epoch
-        print("Creating {} train instances...".format(samples))
-        create_dataset_metric(nmin, nmax, conn_min, conn_max, path="TSP-train", samples=samples, bins=bins)
-        print("\nCreating {} test instances...".format(samples))
-        create_dataset_metric(nmin, nmax, conn_min, conn_max, path="TSP-test", samples=samples, bins=bins)
+        train_samples = batch_size*train_batches_per_epoch
+        test_samples = batch_size*test_batches_per_epoch
+        print("Creating {} train instances...".format(train_samples))
+        create_dataset_metric(nmin, nmax, conn_min, conn_max, path="TSP-train", samples=train_samples, bins=bins)
+        print("\nCreating {} test instances...".format(test_samples))
+        create_dataset_metric(nmin, nmax, conn_min, conn_max, path="TSP-test", samples=test_samples, bins=bins)
         print('\n')
     #end
 
@@ -484,12 +485,12 @@ if __name__ == '__main__':
                     epoch = epoch
                     )
                 )
-                print('Cost (Loss,Deviation):\t\t\t({loss:.3f},{dev:.3f})'.format(
+                print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
                     loss = test_stats['cost_loss'][batch_i],
                     dev = test_stats['deviation'][batch_i]
                     )
                 )
-                print('Edges Loss:\t\t\t\t{loss:.3f}'.format(
+                print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
                     loss = test_stats['edges_loss'][batch_i]
                     )
                 )
@@ -512,14 +513,20 @@ if __name__ == '__main__':
 
                 print('--------------------------------------------------------------------\n')
 
-                logfile.write('{epoch} {tr_cost_loss} {tr_edges_loss} {tr_dev} {tst_cost_loss} {tst_edges_loss} {tst_dev}\n'.format(
+                logfile.write('{epoch} {tr_cost_loss} {tr_edges_loss} {tr_dev} {tr_precision} {tr_recall} {tr_true_neg} {tst_cost_loss} {tst_edges_loss} {tst_dev} {tst_precision} {tst_recall} {tst_true_neg}\n'.format(
                     epoch = epoch,
                     tr_cost_loss = np.mean(train_stats['cost_loss']),
                     tr_edges_loss = np.mean(train_stats['edges_loss']),
                     tr_dev = np.mean(train_stats['deviation']),
+                    tr_precision = np.mean(train_stats['precision']),
+                    tr_recall = np.mean(train_stats['recall']),
+                    tr_true_neg = np.mean(train_stats['true_neg']),
                     tst_cost_loss = np.mean(test_stats['cost_loss']),
                     tst_edges_loss = np.mean(test_stats['edges_loss']),
-                    tst_dev = np.mean(test_stats['deviation'])
+                    tst_dev = np.mean(test_stats['deviation']),
+                    tst_precision = np.mean(test_stats['precision']),
+                    tst_recall = np.mean(test_stats['recall']),
+                    tst_true_neg = np.mean(test_stats['true_neg']),
                     )
                 )
                 logfile.flush()                
