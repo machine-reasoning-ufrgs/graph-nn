@@ -46,29 +46,31 @@ class InstanceLoader(object):
         # total_edges: total number of edges among all instances
         total_edges     = sum(n_edges)
 
-        # Compute grouped matrices Ma_all and Mw_all
-        Ma_all, Mw_all = np.zeros((total_vertices,total_vertices)), np.zeros((total_vertices,total_vertices))
-        for (i,Ma,Mw) in [ (i,x[0],x[1]) for (i,x) in enumerate(instances) ]:
+        # Compute grouped matrices Ma_all, Me_all and Mw_all
+        M           = np.zeros((total_edges,total_vertices))
+        W           = np.zeros((total_edges,1))
+        edges_mask  = np.zeros(total_edges)
+        for (i,(Ma,Mw,route)) in enumerate(instances):
+            
             n_acc = sum(n_vertices[0:i])
-            Ma_all[n_acc:n_acc+n_vertices[i], n_acc:n_acc+n_vertices[i]] = Ma
-            Mw_all[n_acc:n_acc+n_vertices[i], n_acc:n_acc+n_vertices[i]] = Mw
-        #end
+            m_acc = sum(n_edges[0:i])
 
-        # edges: a list of node index 2-uples, each corresponding to an edge in Ma_all
-        edges = list(zip(np.nonzero(Ma_all)[0], np.nonzero(Ma_all)[1]))
-        # edge_index[(i,j)]: the index of the edge (i,j)
-        edge_index = { (i,j):e for (e,(i,j)) in enumerate(edges) }
+            edges = list(zip(np.nonzero(Ma)[0], np.nonzero(Ma)[1]))
 
-        # route_edges[i]: 1 if the i-th edge belongs to the route of some instance
-        route_edges = np.zeros(total_edges, dtype=int)
-        for (i,route) in [ (i,x[2]) for (i,x) in enumerate(instances) ]:
-            route_relabelled = [ sum(n_vertices[0:i])+x for x in route ]
-            for x,y in zip(route_relabelled[:-1], route_relabelled[1:]):
-                route_edges[edge_index[(min(x,y), max(x,y))]] = 1
+            route_edges = [ (min(x,y),max(x,y)) for (x,y) in zip(route,route[1:]+route[0:1]) ]
+
+            for e,(x,y) in enumerate(edges):
+                M[m_acc+e,n_acc+x] = 1
+                M[m_acc+e,n_acc+y] = 1
+                W[m_acc+e] = 1
+
+                if (x,y) in route_edges:
+                    edges_mask[m_acc+e] = 1
+                #end
             #end
         #end
 
-        return Ma_all, Mw_all, n_vertices, n_edges, route_edges
+        return M, W, edges_mask, n_vertices, n_edges
     #end
 
     def get_batches(self, batch_size):
@@ -299,38 +301,4 @@ def create_dataset_metric(nmin, nmax, conn_min, conn_max, path, bins=10**6, conn
             print('{}% Complete'.format(np.round(100*i/samples)))
         #end
     #end
-#end
-
-def to_quiver(Ma, Mw):
-
-    total_vertices  = Ma.shape[0]
-    total_edges     = len(np.nonzero(Ma)[0])
-
-    # Define matrices M and W
-    M = np.zeros((total_edges,total_vertices))
-    W = np.zeros((total_edges,1))
-    R = np.zeros((total_edges,1))
-    for (e,(i,j)) in enumerate(zip(list(np.nonzero(Ma)[0]), list(np.nonzero(Ma)[1]))):
-        M[e,i] = 1
-        M[e,j] = 1
-        W[e,0] = Mw[i,j]
-        R[e,0] = e / total_edges
-    #end
-    return M,W,R
-#end
-
-def get_edges_mask(Ma,route):
-    """
-        Compute a binary mask marking which edges are in the route, given an
-        adjacency matrix and list of edge indices
-    """
-    edges = list(zip(np.nonzero(Ma)[0], np.nonzero(Ma)[1]))
-    edge_index = { (i,j):e for (e,(i,j)) in enumerate(edges) }
-
-    route_edges = np.zeros(len(edges))
-    for (i,j) in zip(route[:-1],route[1:]):
-        route_edges[edge_index[(min(i,j),max(i,j))]] = 1
-    #end
-
-    return route_edges
 #end

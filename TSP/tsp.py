@@ -12,15 +12,25 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from graphnn import GraphNN
 from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
-from tsp_utils import InstanceLoader, create_dataset_metric, to_quiver
+from tsp_utils import InstanceLoader, create_dataset_metric
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-def build_network(d):
-    # Hyperparameters
-    learning_rate = 2e-5
-    parameter_l2norm_scaling = 1e-10
-    global_norm_gradient_clipping_ratio = 0.65
+def build_network(d = 128):
+
+    # Define hyperparameters
+    params = {
+        'd': d,
+        'learning_rate': 2e-5,
+        'l2norm_scaling': 1e-10,
+        'global_norm_gradient_clipping_ratio': 0.65
+    }
+
+    # Define placeholder for routes' edges (a mask of edges per problem)
+    edges_mask = tf.placeholder( tf.float32, [ None ], name = 'edges_mask' )
+    # Define placeholders for the list of number of vertices and edges per instance
+    n_vertices  = tf.placeholder( tf.int32, shape = (None,), name = 'n_vertices')
+    n_edges     = tf.placeholder( tf.int32, shape = (None,), name = 'edges')
 
     # Define GNN dictionary
     GNN = {}
@@ -29,9 +39,9 @@ def build_network(d):
     gnn = GraphNN(
         {
             # V is the set of vertices
-            "V": d,
+            "V": params['d'],
             # E is the set of edges
-            "E": d
+            "E": params['d']
         },
         {
             # M is a E×V adjacency matrix connecting each edge to the vertices it is connected to
@@ -70,231 +80,181 @@ def build_network(d):
         name="TSP"
     )
 
+    # Populate GNN dictionary
+    GNN['gnn']          = gnn
+    GNN['edges_mask']   = edges_mask
+    GNN['n_vertices']   = n_vertices
+    GNN['n_edges']      = n_edges
+
     # Define E_vote, which will compute one logit for each edge
     E_vote_MLP = Mlp(
         layer_sizes = [ d for _ in range(3) ],
         activations = [ tf.nn.relu for _ in range(3) ],
         output_size = 1,
-        name = "E_vote",
+        name = 'E_vote',
         name_internal_layers = True,
         kernel_initializer = tf.contrib.layers.xavier_initializer(),
         bias_initializer = tf.zeros_initializer()
         )
 
-    # Define placeholder for routes' edges (a mask of edges per problem)
-    route_edges = tf.placeholder( tf.float32, [ None ], name = "route_edges" )
-
-    # Define placeholder for routes' costs (one per problem)
-    route_cost = tf.placeholder( tf.float32, [ None ], name = "route_cost" )
-
-    # Placeholders for the list of number of vertices and edges per instance
-    n_vertices  = tf.placeholder( tf.int32, shape = (None,), name = "n_vertices" )
-    n_edges     = tf.placeholder( tf.int32, shape = (None,), name = "edges" )
-
-    # Compute the number of vertices
-    n = tf.shape( gnn.matrix_placeholders["M"] )[1]
-    # Compute number of problems
-    p = tf.shape( route_cost )[0]
-
     # Get the last embeddings
-    E_n = gnn.last_states["E"].h
+    E_n = gnn.last_states['E'].h
+    # Compute a vote for each embedding
     E_vote = tf.reshape(E_vote_MLP(E_n), [-1])
+    # For each edge, compute a probability that it belongs to the optimal TSP route
+    GNN['E_prob'] = tf.sigmoid(E_vote)
 
-    # Compute a probability pᵢ ∈ [0,1] that each edge belongs to the TSP optimal route
-    E_prob = tf.sigmoid(E_vote)
-
-    # Compute a 'cost' loss, which is the mean squared error between the predicted route cost and the actual route cost
-    cost_loss = tf.square(
-        tf.subtract(
-            tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), E_prob)),
-            tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges)
+    # Compute the number of problems in the batch
+    num_problems = tf.shape(n_vertices)[0]
+    # n_edges_acc[i] = ∑{i=0..i}(n_edges[i])
+    n_edges_acc = tf.map_fn(lambda i: tf.reduce_sum(tf.gather(n_edges, tf.range(0,i))), tf.range(0,num_problems))
+    # Compute the true and predicted cost for each problem in the batch
+    _, true_costs, predicted_costs_fuzzy, predicted_costs_binary = tf.while_loop(
+      lambda i, true_costs, predicted_costs_fuzzy, predicted_costs_binary: tf.less(i, num_problems),
+      lambda i, true_costs, predicted_costs_fuzzy, predicted_costs_binary:
+        (
+            (i+1),
+            true_costs.write(
+                i,
+                tf.reduce_sum(
+                    tf.multiply(
+                        tf.gather(edges_mask, tf.range(n_edges_acc[i], n_edges_acc[i] + n_edges[i])),
+                        tf.gather(gnn.matrix_placeholders['W'], tf.range(n_edges_acc[i], n_edges_acc[i] + n_edges[i]))
+                    )
+                )
+            ),
+            predicted_costs_fuzzy.write(
+                i,
+                tf.reduce_sum(
+                    tf.multiply(
+                        tf.gather(GNN['E_prob'], tf.range(n_edges_acc[i], n_edges_acc[i] + n_edges[i])),
+                        tf.gather(gnn.matrix_placeholders['W'], tf.range(n_edges_acc[i], n_edges_acc[i] + n_edges[i]))
+                    )
+                )
+            ),
+            predicted_costs_binary.write(
+                i,
+                tf.reduce_sum(
+                    tf.multiply(
+                        tf.gather(tf.round(GNN['E_prob']), tf.range(n_edges_acc[i], n_edges_acc[i] + n_edges[i])),
+                        tf.gather(gnn.matrix_placeholders['W'], tf.range(n_edges_acc[i], n_edges_acc[i] + n_edges[i]))
+                    )
+                )
             )
-        )
+        ),
+        [tf.constant(0), tf.TensorArray(size=num_problems, dtype=tf.float32), tf.TensorArray(size=num_problems, dtype=tf.float32), tf.TensorArray(size=num_problems, dtype=tf.float32)]
     )
+    true_costs, predicted_costs_fuzzy, predicted_costs_binary = true_costs.stack(), predicted_costs_fuzzy.stack(), predicted_costs_binary.stack()
+    # Compute loss as the mean squared error (elementwise) between predicted costs and route costs
+    GNN['cost_loss'] = tf.losses.mean_squared_error(predicted_costs_fuzzy, true_costs)
+    # Compute the average relative deviation between predicted costs and true costs
+    GNN['deviation'] = tf.reduce_mean(tf.div(tf.subtract(predicted_costs_binary, true_costs), true_costs))
 
-    # Define cost_deviation as the relative deviation between the predicted
-    # cost and the true route cost
-    predicted_cost  = tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), tf.round(E_prob)))
-    true_cost       = tf.reduce_sum(tf.multiply(tf.reshape(gnn.matrix_placeholders['W'],[-1]), route_edges))
-    cost_deviation  = tf.reduce_mean(
-        tf.div(
-            tf.subtract(predicted_cost,true_cost),
-            true_cost
-            )
-        )
-    
     # Count the number of edges that appear in the solution
-    pos_edges_n = tf.reduce_sum(route_edges)
+    pos_edges_n = tf.reduce_sum(edges_mask)
     # Count the number of edges that do not appear in the solution
-    neg_edges_n = tf.reduce_sum(tf.subtract(tf.ones_like(route_edges), route_edges))
+    neg_edges_n = tf.reduce_sum(tf.subtract(tf.ones_like(edges_mask), edges_mask))
     # Compute edges loss
-    edges_loss = tf.losses.sigmoid_cross_entropy(
-        multi_class_labels  = route_edges,
+    GNN['edges_loss'] = tf.losses.sigmoid_cross_entropy(
+        multi_class_labels  = edges_mask,
         logits              = E_vote,
         weights             = tf.add(
             tf.scalar_mul(
                 tf.divide(tf.add(pos_edges_n,neg_edges_n),pos_edges_n),
-                route_edges),
+                edges_mask),
             tf.scalar_mul(
                 tf.divide(tf.add(pos_edges_n,neg_edges_n),neg_edges_n),
-                tf.subtract(tf.ones_like(route_edges), route_edges)
+                tf.subtract(tf.ones_like(edges_mask), edges_mask)
                 )
             )
         )
 
-    """
-        We need to enforce a route. This requires that we penalize nodes with
-        more than two connections (actually four connections because we
-        consider edges in both directions).
+    # Define optimizer
+    optimizer = tf.train.AdamOptimizer(name='Adam', learning_rate=params['learning_rate'])
 
-        This can be done by computing a shape (|V|,1) tensor of node degrees and applying a
-        mean squared loss between it and a tensor 4s.
-
-        To compute such a tensor, we can simply multiply Mᵀ × E_prob.
-        This will produce a (|V|,1) tensor in which the entry corresponding to
-        each vertex is the summation over the probabilities of all edges which
-        connect to it. This tensor can be viewed as an array of expected node
-        degrees, given the probability distribution over edges.
-    """
-    expected_degrees = tf.matmul(gnn.matrix_placeholders['M'], tf.expand_dims(E_prob,1), adjoint_a=True)
-    degree_loss = tf.losses.mean_squared_error(E_prob, tf.scalar_mul(2,tf.ones_like(E_prob)))
-
-    # Compute precision, recall, true negative rate and accuracy in terms of selected edges
-    true_positives = tf.reduce_sum(
-            tf.multiply(
-                route_edges,
-                tf.cast(
-                    tf.equal(
-                        route_edges,
-                        tf.round(E_prob)
-                        ),
-                    tf.float32
-                    )
-            )
-        )
-
-    true_negatives = tf.reduce_sum(
-            tf.multiply(
-                tf.subtract(tf.ones_like(route_edges),route_edges),
-                tf.cast(
-                    tf.equal(
-                        route_edges,
-                        tf.round(E_prob)
-                        ),
-                    tf.float32
-                    )
-            )
-        )
-
-    false_positives = tf.reduce_sum(
-            tf.multiply(
-                tf.subtract(tf.ones_like(route_edges),route_edges),
-                tf.cast(
-                    tf.not_equal(
-                        route_edges,
-                        tf.round(E_prob)
-                        ),
-                    tf.float32
-                    )
-            )
-        )
-
-    false_negatives = tf.reduce_sum(
-            tf.multiply(
-                route_edges,
-                tf.cast(
-                    tf.not_equal(
-                        route_edges,
-                        tf.round(E_prob)
-                        ),
-                    tf.float32
-                    )
-            )
-        )
-
-    precision = tf.divide(
-        true_positives,
-        tf.add(true_positives,false_positives)
-    )
-
-    recall = tf.divide(
-        true_positives,
-        tf.add(true_positives,false_negatives)
-    )
-
-    true_negative_rate = tf.divide(
-        true_negatives,
-        tf.add(true_negatives,false_positives)
-    )
-
-    accuracy = tf.divide(
-        tf.add(true_positives,true_negatives),
-        tf.reduce_sum([true_positives,true_negatives,false_positives,false_negatives])
-    )
-
-    # top_k accuracy
-    top_edges_acc = tf.reduce_mean(
-        tf.cast(
-            tf.equal(
-                # Sum one-hot representations to obtain edges mask
-                tf.reduce_sum(
-                    # Convert array of indices to array of one-hot representations
-                    tf.one_hot(
-                        # Get the indices of the n edges with the higher probabilities (as given by E_prob)
-                        tf.nn.top_k(E_prob, k=n)[1],
-                        depth = tf.shape(route_edges)[0]
-                        ),
-                    axis = 0
-                    ),
-                    route_edges
-                ),
-            tf.float32
-            )
-        )
+    # Compute cost relative to L2 normalization
+    vars_cost = tf.add_n([ tf.nn.l2_loss(var) for var in tf.trainable_variables() ])
     
-    vars_cost       = tf.zeros([])
-    tvars           = tf.trainable_variables()
-    for var in tvars:
-        vars_cost = tf.add( vars_cost, tf.nn.l2_loss( var ) )
-    #end for
-
-    # Define train step for cost loss
-    optimizer           = tf.train.AdamOptimizer( name = "Adam", learning_rate = learning_rate )
+    # Define gradients and train step
+    for loss_type in ['cost','edges']:
+        grads, _ = tf.clip_by_global_norm(tf.gradients(GNN[loss_type+'_loss'] + tf.multiply(vars_cost, params['l2norm_scaling']),tf.trainable_variables()),params['global_norm_gradient_clipping_ratio'])
+        GNN['train_step_{}'.format(loss_type)] = optimizer.apply_gradients(zip(grads, tf.trainable_variables()))
+    #end
     
-    grads, _            = tf.clip_by_global_norm( tf.gradients( tf.add( cost_loss, tf.multiply(vars_cost, parameter_l2norm_scaling) ), tvars ), global_norm_gradient_clipping_ratio )
-    cost_train_step     = optimizer.apply_gradients( zip( grads, tvars ) )
-
-    # Define train step for edges loss  
-    grads, _            = tf.clip_by_global_norm( tf.gradients( tf.add( edges_loss, tf.multiply(vars_cost, parameter_l2norm_scaling) ), tvars ), global_norm_gradient_clipping_ratio )
-    edges_train_step    = optimizer.apply_gradients( zip( grads, tvars ) )
-
-    # Define train step for edges loss  
-    grads, _            = tf.clip_by_global_norm( tf.gradients( tf.add( degree_loss, tf.multiply(vars_cost, parameter_l2norm_scaling) ), tvars ), global_norm_gradient_clipping_ratio )
-    degree_train_step   = optimizer.apply_gradients( zip( grads, tvars ) )
-
-    GNN["gnn"]                      = gnn
-    GNN["n_vertices"]               = n_vertices
-    GNN["n_edges"]                  = n_edges
-    GNN["route_edges"]              = route_edges
-    
-    GNN["cost_loss"]                = cost_loss
-    GNN["edges_loss"]               = edges_loss
-    GNN["degree_loss"]              = degree_loss
-    
-    GNN["precision"]                = precision
-    GNN["recall"]                   = recall
-    GNN["true_negative_rate"]       = true_negative_rate
-    GNN["accuracy"]                 = accuracy
-    GNN["top_edges_acc"]            = top_edges_acc
-    GNN["cost_deviation"]           = cost_deviation
-    
-    GNN["cost_train_step"]          = cost_train_step
-    GNN["edges_train_step"]         = edges_train_step
-    GNN["degree_train_step"]        = degree_train_step
-    
-    GNN["E_prob"]                   = E_prob
-    
+    # Return GNN dictionary
     return GNN
+#end
+
+def compute_acc(batch, e_prob):
+
+    # Get features, problem sizes, labels for this batch
+    M, W, edges_mask, n_vertices, n_edges = batch
+
+    # Get number of problems in batch
+    num_problems = len(n_vertices)
+
+    degree_acc              = np.zeros(num_problems)
+    visited_acc             = np.zeros(num_problems)
+    conn_comp_acc           = np.zeros(num_problems)
+    precision               = np.zeros(num_problems)
+    recall                  = np.zeros(num_problems)
+    true_negative_rate      = np.zeros(num_problems)
+
+    # For each problem in the batch
+    for prob_i in range(num_problems):
+        
+        n = n_vertices[prob_i]
+        m = n_edges[prob_i]
+        n_acc = int(np.sum(n_vertices[0:prob_i]))
+        m_acc = int(np.sum(n_edges[0:prob_i]))
+        
+        # Get list of edges for this problem
+        edges = [ tuple(np.nonzero(x)[0]-n_acc) for x in M[m_acc:m_acc+m] ]
+
+        # Get list of true edges for this problem
+        true_edges = [ tuple(np.nonzero(x)[0]-n_acc) for e,x in enumerate(M[m_acc:m_acc+m]) if edges_mask[e] == 1 ]
+
+        # Get list of predicted edges for this problem
+        predicted_edges = [ tuple(np.nonzero(x)[0]-n_acc) for e,x in enumerate(M[m_acc:m_acc+m]) if e_prob[e] > 0.5 ]
+
+        # Compute the degree of each vertex
+        degrees = np.array([ len([(x,y) for (x,y) in predicted_edges if i in [x,y]]) for i in range(n) ])
+
+        # Compute the fraction of nodes with the correct degree (which is 2)
+        degree_acc[prob_i] = np.mean((degrees == 2).astype(np.float32))
+
+        # Compute the fraction of visited nodes
+        visited_acc[prob_i] = np.mean((degrees > 0).astype(np.float32))
+
+        # Compute the number of connected components
+        connected_component = np.arange(n)
+        for i in range(n):
+            # Perform a BFS starting at the i-th vertex
+            visited = np.zeros(n,dtype=np.bool)
+            current = []
+            current.append(i); visited[i] = 1
+            while len(current) > 0:
+                neighbors = [ j for j in range(n) if not visited[j] and any([ (x in current and j==y) or (y in current and j==x) for (x,y) in predicted_edges ]) ]
+                visited[neighbors] = True
+                current = neighbors
+            #end
+            connected_component[[x for x in visited]] = min(connected_component[[x for x in visited]])
+        #end
+        conn_comp_acc[prob_i] = 1.0 / len(set(connected_component))
+
+        # Compute precision, recall and true negative rate corresponding to
+        # the predicted set of edges compared with the true set of edges
+        true_positives  = len([ (i,j) for (i,j) in edges if (i,j) in predicted_edges and (i,j) in true_edges ])
+        false_positives = len([ (i,j) for (i,j) in edges if (i,j) in predicted_edges and (i,j) not in true_edges ])
+        true_negatives  = len([ (i,j) for (i,j) in edges if (i,j) not in predicted_edges and (i,j) not in true_edges ])
+        false_negatives = len([ (i,j) for (i,j) in edges if (i,j) not in predicted_edges and (i,j) in true_edges ])
+        precision[prob_i]           = true_positives / (true_positives + false_positives) if (true_positives + false_positives) != 0 else float('nan')
+        recall[prob_i]              = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) != 0 else float('nan')
+        true_negative_rate[prob_i]  = true_negatives / (true_negatives + false_positives) if (true_negatives + false_positives) != 0 else float('nan')
+
+    #end
+
+    return np.mean(degree_acc), np.mean(visited_acc), np.mean(conn_comp_acc), np.mean(precision), np.mean(recall), np.mean(true_negative_rate)
 #end
 
 if __name__ == '__main__':
@@ -303,13 +263,15 @@ if __name__ == '__main__':
     load_checkpoints    = False
     save_checkpoints    = True
 
-    d                   = 128
-    epochs              = 100
-    batch_size          = 32
-    batches_per_epoch   = 128
-    time_steps          = 25
-    loss_type           = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ['cost','edges'] else 'edges'
-    bins                = 10**6
+    d                       = 128
+    epochs                  = 100
+    batch_size              = 32
+    train_batches_per_epoch = 2
+    test_batches_per_epoch  = 2
+    time_steps              = 25
+    bins                    = 10**6
+
+    loss_type = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ['cost','edges'] else 'edges'
 
     if create_datasets:
         nmin, nmax = 20, 40
@@ -339,194 +301,228 @@ if __name__ == '__main__':
         sess.run( tf.global_variables_initializer() )
 
         # Restore saved weights
-        if load_checkpoints: load_weights(sess,"./TSP-checkpoints-{}".format(loss_type));
+        if load_checkpoints: load_weights(sess,'./TSP-checkpoints-{}'.format(loss_type));
 
-        with open("log-TSP-{}.dat".format(loss_type),"w") as logfile:
+        with open('log-TSP-{}.dat'.format(loss_type),'w') as logfile:
             # Run for a number of epochs
             print("Running for {} epochs\n".format(epochs))
             for epoch in range( epochs ):
 
-                # Reset train loader because we are starting a new epoch
+                # Reset train and test loaders because we are starting a new epoch
                 train_loader.reset()
+                test_loader.reset()
 
-                train_cost_loss             = np.zeros(batches_per_epoch)
-                train_edges_loss            = np.zeros(batches_per_epoch)
-                train_degree_loss           = np.zeros(batches_per_epoch)
-                train_precision             = np.zeros(batches_per_epoch)
-                train_recall                = np.zeros(batches_per_epoch)
-                train_true_negative_rate    = np.zeros(batches_per_epoch)
-                train_accuracy              = np.zeros(batches_per_epoch)
-                train_tacc                  = np.zeros(batches_per_epoch)
-                train_cost_deviation        = np.zeros(batches_per_epoch)
+                train_stats = {
+                    'cost_loss':        np.zeros(train_batches_per_epoch),
+                    'edges_loss':       np.zeros(train_batches_per_epoch),
+                    'deviation':        np.zeros(train_batches_per_epoch),
+                    'degree_acc':       np.zeros(train_batches_per_epoch),
+                    'visited_acc':      np.zeros(train_batches_per_epoch),
+                    'conn_comp_acc':    np.zeros(train_batches_per_epoch),
+                    'precision':        np.zeros(train_batches_per_epoch),
+                    'recall':           np.zeros(train_batches_per_epoch),
+                    'true_neg':         np.zeros(train_batches_per_epoch),
+                }
 
-                # Run batches
-                for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), batches_per_epoch):
+                test_stats = {
+                    'cost_loss':        np.zeros(train_batches_per_epoch),
+                    'edges_loss':       np.zeros(train_batches_per_epoch),
+                    'deviation':        np.zeros(train_batches_per_epoch),
+                    'degree_acc':       np.zeros(train_batches_per_epoch),
+                    'visited_acc':      np.zeros(train_batches_per_epoch),
+                    'conn_comp_acc':    np.zeros(train_batches_per_epoch),
+                    'precision':        np.zeros(train_batches_per_epoch),
+                    'recall':           np.zeros(train_batches_per_epoch),
+                    'true_neg':         np.zeros(train_batches_per_epoch),
+                }
+
+                # Run test batches
+                print("Training...")
+                print("Perfroming stochastic gradient descent on {} loss".format(loss_type))
+                print('--------------------------------------------------------------')
+                for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), train_batches_per_epoch):
 
                     # Get features, problem sizes, labels for this batch
-                    Ma_all, Mw_all, n_vertices, n_edges, route_edges = batch
+                    M, W, edges_mask, n_vertices, n_edges = batch
 
-                    # Convert to quiver format
-                    M, W, R = to_quiver(Ma_all, Mw_all)
-
-                    # Run one SGD iteration
-                    _, train_cost_loss[batch_i], train_edges_loss[batch_i], train_degree_loss[batch_i], train_precision[batch_i], train_recall[batch_i], train_true_negative_rate[batch_i], train_accuracy[batch_i], train_tacc[batch_i], train_cost_deviation[batch_i], e_prob = sess.run(
-                        [ GNN['{}_train_step'.format(loss_type)], GNN['cost_loss'], GNN['edges_loss'], GNN['degree_loss'], GNN['precision'], GNN['recall'], GNN['true_negative_rate'], GNN['accuracy'], GNN['top_edges_acc'], GNN['cost_deviation'],  GNN["E_prob"] ],
-                        feed_dict = {
-                            GNN["gnn"].matrix_placeholders["M"]:    M,
-                            GNN["gnn"].matrix_placeholders["W"]:    W,
-                            #GNN["gnn"].matrix_placeholders["R"]:    R,
-                            GNN["n_vertices"]:                      n_vertices,
-                            GNN["n_edges"]:                         n_edges,
-                            GNN["gnn"].time_steps:                  time_steps,
-                            GNN["route_edges"]:                     route_edges
+                    # Run one SGD iteration and fetch loss and cost deviation
+                    _, train_stats['cost_loss'][batch_i], train_stats['edges_loss'][batch_i], train_stats['deviation'][batch_i], e_prob = sess.run(
+                        [ GNN['train_step_{}'.format(loss_type)], GNN['cost_loss'], GNN['edges_loss'], GNN['deviation'], GNN['E_prob'] ],
+                        feed_dict = 
+                        {
+                            GNN['gnn'].matrix_placeholders['M']: M,
+                            GNN['gnn'].matrix_placeholders['W']: W,
+                            GNN['gnn'].time_steps: time_steps,
+                            GNN['n_vertices']: n_vertices,
+                            GNN['n_edges']: n_edges,
+                            GNN['edges_mask']: edges_mask
                         }
                     )
 
-                    print('Train Epoch {epoch}\tBatch {batch}\t(n,m,batch size):\t\t({n},{m},{batch_size})'.format(
+                    # Obtain degree accuracy, visited accuracy, # connected components, precision, recall and true negative rate
+                    train_stats['degree_acc'][batch_i], train_stats['visited_acc'][batch_i], train_stats['conn_comp_acc'][batch_i], train_stats['precision'][batch_i], train_stats['recall'][batch_i], train_stats['true_neg'][batch_i] = compute_acc(batch, e_prob)
+
+                    print('Train Epoch {epoch}\tBatch {batch}\t(n,m,batch size):\t({n},{m},{batch_size})'.format(
                         epoch = epoch,
                         batch = batch_i,
                         n = np.sum(n_vertices),
                         m = np.sum(n_edges),
                         batch_size = batch_size
-                        ))
-                    print('(Cost,Edges,Degree) Loss:\t\t\t\t({cost_loss:.3f}, {edges_loss:.3f}, {degree_loss:.3f})'.format(
-                        cost_loss   = train_cost_loss[batch_i],
-                        edges_loss  = train_edges_loss[batch_i],
-                        degree_loss = train_degree_loss[batch_i]
-                        ))
-                    print('(Precision, Recall, True Negative Rate, Accuracy):\t({precision:.3f}, {recall:.3f}, {true_negative_rate:.3f}, {accuracy:.3f})'.format(
-                        precision           = train_precision[batch_i],
-                        recall              = train_recall[batch_i],
-                        true_negative_rate  = train_true_negative_rate[batch_i],
-                        accuracy            = train_accuracy[batch_i],
-                        ))
-                    print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
-                        top_edges_acc = train_tacc[batch_i]
-                        ))
-                    print('Cost deviation:\t\t\t\t\t\t{cost_deviation:.3f}'.format(
-                        cost_deviation = train_cost_deviation[batch_i]
-                        ))
-                    print('')
+                        )
+                    )
+                    print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
+                        loss = train_stats['cost_loss'][batch_i],
+                        dev = train_stats['deviation'][batch_i]
+                        )
+                    )
+                    print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
+                        loss = train_stats['edges_loss'][batch_i]
+                        )
+                    )
+                    print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                        deg = train_stats['degree_acc'][batch_i],
+                        vis = train_stats['visited_acc'][batch_i],
+                        conn = train_stats['conn_comp_acc'][batch_i],
+                        )
+                    )
+                    print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                        prec = train_stats['precision'][batch_i],
+                        rec = train_stats['recall'][batch_i],
+                        tneg = train_stats['true_neg'][batch_i],
+                        )
+                    )
+                    print('--------------------------------------------------------------')
                 #end
 
                 # Print train epoch summary
                 print('Train Epoch {epoch} Averages'.format(
                     epoch = epoch
-                    ))
-                print('(Cost,Edges,Degree) Loss:\t\t\t\t({cost_loss:.3f}, {edges_loss:.3f}, {degree_loss:.3f})'.format(
-                        cost_loss   = np.mean(train_cost_loss),
-                        edges_loss  = np.mean(train_edges_loss),
-                        degree_loss = np.mean(train_degree_loss)
-                        ))
-                print('(Precision, Recall, True Negative Rate, Accuracy):\t({precision:.3f}, {recall:.3f}, {true_negative_rate:.3f}, {accuracy:.3f})'.format(
-                    precision           = np.mean(train_precision),
-                    recall              = np.mean(train_recall),
-                    true_negative_rate  = np.mean(train_true_negative_rate),
-                    accuracy            = np.mean(train_accuracy),
-                    ))
-                print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
-                    top_edges_acc = np.mean(train_tacc)
-                    ))
-                print('Cost deviation:\t\t\t\t\t\t{cost_deviation:.3f}'.format(
-                        cost_deviation = np.mean(train_cost_deviation)
-                        ))
+                    )
+                )
+                print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
+                    loss = np.mean(train_stats['cost_loss']),
+                    dev = np.mean(train_stats['deviation'])
+                    )
+                )
+                print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
+                    loss = np.mean(train_stats['edges_loss'])
+                    )
+                )
+                print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                    deg = np.mean(train_stats['degree_acc']),
+                    vis = np.mean(train_stats['visited_acc']),
+                    conn = np.mean(train_stats['conn_comp_acc'])
+                    )
+                )
+                print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                    prec = np.mean(train_stats['precision']),
+                    rec = np.mean(train_stats['recall']),
+                    tneg = np.mean(train_stats['true_neg'])
+                    )
+                )
                 print('')
 
+                # Run test batches
                 print("Testing...")
-                
-                # Reset test loader as we are starting a new epoch
-                test_loader.reset()
-                
-                test_cost_loss          = np.zeros(batches_per_epoch)
-                test_edges_loss         = np.zeros(batches_per_epoch)
-                test_degree_loss        = np.zeros(batches_per_epoch)
-                test_precision          = np.zeros(batches_per_epoch)
-                test_recall             = np.zeros(batches_per_epoch)
-                test_true_negative_rate = np.zeros(batches_per_epoch)
-                test_accuracy           = np.zeros(batches_per_epoch)
-                test_tacc               = np.zeros(batches_per_epoch)
-                test_cost_deviation     = np.zeros(batches_per_epoch)
-
-                # Run batches
-                for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), batches_per_epoch):
+                print('--------------------------------------------------------------')
+                for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), test_batches_per_epoch):
 
                     # Get features, problem sizes, labels for this batch
-                    Ma_all, Mw_all, n_vertices, n_edges, route_edges = batch
+                    M, W, edges_mask, n_vertices, n_edges = batch
 
-                    # Convert to quiver format
-                    M, W, R = to_quiver(Ma_all, Mw_all)
-
-                    test_cost_loss[batch_i], test_edges_loss[batch_i], test_degree_loss[batch_i], test_precision[batch_i], test_recall[batch_i], test_true_negative_rate[batch_i], test_accuracy[batch_i], test_tacc[batch_i], test_cost_deviation[batch_i], e_prob = sess.run(
-                        [ GNN['cost_loss'], GNN['edges_loss'], GNN['degree_loss'], GNN['precision'], GNN['recall'], GNN['true_negative_rate'], GNN['accuracy'], GNN['top_edges_acc'], GNN['cost_deviation'],  GNN["E_prob"] ],
-                        feed_dict = {
-                            GNN["gnn"].matrix_placeholders["M"]:    M,
-                            GNN["gnn"].matrix_placeholders["W"]:    W,
-                            #GNN["gnn"].matrix_placeholders["R"]:    R,
-                            GNN["n_vertices"]:                      n_vertices,
-                            GNN["n_edges"]:                         n_edges,
-                            GNN["gnn"].time_steps:                  time_steps,
-                            GNN["route_edges"]:                     route_edges
+                    # Run one SGD iteration and fetch loss and cost deviation
+                    test_stats['cost_loss'][batch_i], test_stats['edges_loss'][batch_i], test_stats['deviation'][batch_i], e_prob = sess.run(
+                        [ GNN['cost_loss'], GNN['edges_loss'], GNN['deviation'], GNN['E_prob'] ],
+                        feed_dict = 
+                        {
+                            GNN['gnn'].matrix_placeholders['M']: M,
+                            GNN['gnn'].matrix_placeholders['W']: W,
+                            GNN['gnn'].time_steps: time_steps,
+                            GNN['n_vertices']: n_vertices,
+                            GNN['n_edges']: n_edges,
+                            GNN['edges_mask']: edges_mask
                         }
                     )
+
+                    # Obtain degree accuracy, visited accuracy, # connected components, precision, recall and true negative rate
+                    test_stats['degree_acc'][batch_i], test_stats['visited_acc'][batch_i], test_stats['conn_comp_acc'][batch_i], test_stats['precision'][batch_i], test_stats['recall'][batch_i], test_stats['true_neg'][batch_i] = compute_acc(batch, e_prob)
+
+                    print('Test Epoch {epoch}\tBatch {batch}\t(n,m,batch size):\t({n},{m},{batch_size})'.format(
+                        epoch = epoch,
+                        batch = batch_i,
+                        n = np.sum(n_vertices),
+                        m = np.sum(n_edges),
+                        batch_size = batch_size
+                        )
+                    )
+                    print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
+                        loss = test_stats['cost_loss'][batch_i],
+                        dev = test_stats['deviation'][batch_i]
+                        )
+                    )
+                    print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
+                        loss = test_stats['edges_loss'][batch_i]
+                        )
+                    )
+                    print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                        deg = test_stats['degree_acc'][batch_i],
+                        vis = test_stats['visited_acc'][batch_i],
+                        conn = test_stats['conn_comp_acc'][batch_i],
+                        )
+                    )
+                    print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                        prec = test_stats['precision'][batch_i],
+                        rec = test_stats['recall'][batch_i],
+                        tneg = test_stats['true_neg'][batch_i],
+                        )
+                    )
+                    print('--------------------------------------------------------------')
                 #end
                 
                 # Print test epoch summary
                 print('Test Epoch {epoch} Averages'.format(
                     epoch = epoch
-                    ))
-                print('(Cost,Edges,Degree) Loss:\t\t\t\t({cost_loss:.3f}, {edges_loss:.3f}, {degree_loss:.3f})'.format(
-                        cost_loss   = np.mean(test_cost_loss),
-                        edges_loss  = np.mean(test_edges_loss),
-                        degree_loss = np.mean(test_degree_loss)
-                        ))
-                print('(Precision, Recall, True Negative Rate, Accuracy):\t({precision:.3f}, {recall:.3f}, {true_negative_rate:.3f}, {accuracy:.3f})'.format(
-                    precision           = np.mean(test_precision),
-                    recall              = np.mean(test_recall),
-                    true_negative_rate  = np.mean(test_true_negative_rate),
-                    accuracy            = np.mean(test_accuracy),
-                    ))
-                print('Top edges accuracy:\t\t\t\t\t{top_edges_acc:.3f}'.format(
-                    top_edges_acc = np.mean(test_tacc)
-                    ))
-                print('Cost deviation:\t\t\t\t\t\t{cost_deviation:.3f}'.format(
-                        cost_deviation = np.mean(test_cost_deviation)
-                        ))
-                print('Degree loss:\t\t\t\t\t\t{degree_loss:.3f}'.format(
-                        degree_loss = np.mean(test_degree_loss)
-                        ))
+                    )
+                )
+                print('Cost (Loss,Deviation):\t\t\t({loss:.3f},{dev:.3f})'.format(
+                    loss = test_stats['cost_loss'][batch_i],
+                    dev = test_stats['deviation'][batch_i]
+                    )
+                )
+                print('Edges Loss:\t\t\t\t{loss:.3f}'.format(
+                    loss = test_stats['edges_loss'][batch_i]
+                    )
+                )
+                print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                    deg = np.mean(test_stats['degree_acc']),
+                    vis = np.mean(test_stats['visited_acc']),
+                    conn = np.mean(test_stats['conn_comp_acc'])
+                    )
+                )
+                print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                    prec = np.mean(test_stats['precision']),
+                    rec = np.mean(test_stats['recall']),
+                    tneg = np.mean(test_stats['true_neg'])
+                    )
+                )
                 print('')
 
                 # Save weights
-                if save_checkpoints: save_weights(sess,"./TSP-checkpoints-{}".format(loss_type));
+                if save_checkpoints: save_weights(sess,'./TSP-checkpoints-{}'.format(loss_type));
 
                 print('--------------------------------------------------------------------\n')
 
-                # Write train and test results into log file
-                logfile.write("{epoch} {tr_cost_loss} {tr_edges_loss} {tr_degree_loss} {tr_precision} {tr_recall} {tr_true_negative_rate} {tr_acc} {tr_tacc} {tr_cost_dev} {te_cost_loss} {te_edges_loss} {te_degree_loss} {te_precision} {te_recall} {te_true_negative_rate} {te_acc} {te_tacc} {te_cost_dev}\n".format(
-                    epoch       = epoch,
-                    
-                    tr_cost_loss            = np.mean(train_cost_loss),
-                    tr_edges_loss           = np.mean(train_edges_loss),
-                    tr_degree_loss          = np.mean(train_degree_loss),
-                    tr_precision            = np.mean(train_precision),
-                    tr_recall               = np.mean(train_recall),
-                    tr_true_negative_rate   = np.mean(train_true_negative_rate),
-                    tr_acc                  = np.mean(train_accuracy),
-                    tr_tacc                 = np.mean(train_tacc),
-                    tr_cost_dev             = np.mean(train_cost_deviation),
-
-                    te_cost_loss            = np.mean(test_cost_loss),
-                    te_edges_loss           = np.mean(test_edges_loss),
-                    te_degree_loss          = np.mean(test_degree_loss),
-                    te_precision            = np.mean(test_precision),
-                    te_recall               = np.mean(test_recall),
-                    te_true_negative_rate   = np.mean(test_true_negative_rate),
-                    te_acc                  = np.mean(test_accuracy),
-                    te_tacc                 = np.mean(test_tacc),
-                    te_cost_dev             = np.mean(test_cost_deviation)
+                logfile.write('{epoch} {tr_cost_loss} {tr_edges_loss} {tr_dev} {tst_cost_loss} {tst_edges_loss} {tst_dev}\n'.format(
+                    epoch = epoch,
+                    tr_cost_loss = np.mean(train_stats['cost_loss']),
+                    tr_edges_loss = np.mean(train_stats['edges_loss']),
+                    tr_dev = np.mean(train_stats['deviation']),
+                    tst_cost_loss = np.mean(test_stats['cost_loss']),
+                    tst_edges_loss = np.mean(test_stats['edges_loss']),
+                    tst_dev = np.mean(test_stats['deviation'])
                     )
                 )
-                logfile.flush()
+                logfile.flush()                
             #end
         #end
     #end
