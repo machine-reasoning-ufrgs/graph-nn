@@ -217,6 +217,7 @@ def ensure_datasets( make_critical = False ):
       os.makedirs( c80dir )
       create_critical_dataset( 80, 512, c80dir )
     #end if
+  #end if
 #end ensure_datasets
 
 if __name__ == '__main__':
