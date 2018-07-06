@@ -40,8 +40,8 @@ if __name__ == "__main__":
     sess.run( tf.global_variables_initializer() )
     
     # Restore saved weights
-    #print( "{timestamp}\t{memory}\tRestoring saved model ... ".format( timestamp = timestamp(), memory = memory_usage() ) )
-    #saver.restore(sess, "./tmp/model.ckpt")
+    print( "{timestamp}\t{memory}\tRestoring saved model ... ".format( timestamp = timestamp(), memory = memory_usage() ) )
+    saver.restore(sess, "./tmp/neurosat.ckpt")
 
     # Test SR distribution
     test_with(
