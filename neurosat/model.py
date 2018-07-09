@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 # Import model builder
-from graphnn import GraphNN
+from graphnn_refactored import GraphNN
 from mlp import Mlp
 from cnf import CNF
 
@@ -68,8 +68,8 @@ def build_neurosat(d):
 
   # Define L_vote
   L_vote_MLP = Mlp(
-    layer_sizes = [ d for _ in range(2) ],
-    activations = [ tf.nn.relu for _ in range(2) ],
+    layer_sizes = [ d for _ in range(3) ],
+    activations = [ tf.nn.relu for _ in range(3) ],
     output_size = 1,
     name = "L_vote",
     name_internal_layers = True,

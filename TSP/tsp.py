@@ -9,7 +9,7 @@ from itertools import islice
 # Add the parent folder path to the sys.path list for importing
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 # Import model builder
-from graphnn import GraphNN
+from graphnn_refactored import GraphNN
 from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
 from tsp_utils import InstanceLoader, create_dataset_metric
@@ -431,7 +431,7 @@ if __name__ == '__main__':
                     # Get features, problem sizes, labels for this batch
                     M, W, edges_mask, n_vertices, n_edges = batch
 
-                    # Run one SGD iteration and fetch loss and cost deviation
+                    # Fetch loss and cost deviation
                     test_stats['cost_loss'][batch_i], test_stats['edges_loss'][batch_i], test_stats['deviation'][batch_i], e_prob = sess.run(
                         [ GNN['cost_loss'], GNN['edges_loss'], GNN['deviation'], GNN['E_prob'] ],
                         feed_dict = 
