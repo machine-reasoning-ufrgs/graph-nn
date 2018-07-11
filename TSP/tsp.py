@@ -345,6 +345,7 @@ def build_network_v2(d):
         kernel_initializer = tf.contrib.layers.xavier_initializer(),
         bias_initializer = tf.zeros_initializer()
         )
+    vote_bias = tf.get_variable(initializer=tf.zeros_initializer(), shape=(), dtype=tf.float32, name='vote_bias')
 
     # Get the last embeddings
     E_n = gnn.last_states['E'].h
@@ -369,13 +370,13 @@ def build_network_v2(d):
             ),
         [0, tf.TensorArray(size=num_problems, dtype=tf.float32)]
         )
-    predictions = predictions.stack()
+    predictions = predictions.stack() + vote_bias
 
     # Define loss
     GNN['loss'] = tf.losses.sigmoid_cross_entropy(multi_class_labels=route_exists, logits=predictions)
 
     # Define accuracy
-    GNN['acc'] = tf.reduce_mean(tf.cast(tf.equal(route_exists, tf.round(predictions)), tf.float32))
+    GNN['acc'] = tf.reduce_mean(tf.cast(tf.equal(route_exists, tf.round(tf.sigmoid(predictions))), tf.float32))
 
     # Define optimizer
     optimizer = tf.train.AdamOptimizer(name='Adam', learning_rate=learning_rate)
@@ -429,7 +430,7 @@ def run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, ve
 
     if verbose:
         # Print stats
-        print('{train_or_test} Epoch {epoch_i} Batch {batch_i}\t|\t(n,m,batch size)=({n},{m},{batch_size})|\t(Loss,Acc)=({loss:.3f},{acc:.3f})'.format(
+        print('{train_or_test} Epoch {epoch_i} Batch {batch_i}\t|\t(n,m,batch size)=({n},{m},{batch_size})\t|\t(Loss,Acc)=({loss:.3f},{acc:.3f})'.format(
             train_or_test = 'Train' if train else 'Test',
             epoch_i = epoch_i,
             batch_i = batch_i,
@@ -438,7 +439,8 @@ def run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, ve
             n = np.sum(n_vertices),
             m = np.sum(n_edges),
             batch_size = n_vertices.shape[0]
-            )
+            ),
+            flush = True
         )
     #end
 
@@ -729,14 +731,16 @@ def main_v2():
     train_batches_per_epoch = 128
     test_batches_per_epoch = 32
     time_steps = 25
-    target_cost_dev = 1
+    target_cost_dev = 0.01
+    load_checkpoints = False
+    save_checkpoints = True
 
     # Create train and test loaders
     train_loader    = InstanceLoader("TSP-train", target_cost_dev)
     test_loader     = InstanceLoader("TSP-test", target_cost_dev)
 
     # Build model
-    print("Building model ...")
+    print("Building model ...", flush=True)
     GNN = build_network_v2(d)
 
     # Disallow GPU use
@@ -744,8 +748,11 @@ def main_v2():
     with tf.Session(config=config) as sess:
 
         # Initialize global variables
-        print("Initializing global variables ... ")
+        print("Initializing global variables ... ", flush=True)
         sess.run( tf.global_variables_initializer() )
+
+        # Restore saved weights
+        if load_checkpoints: load_weights(sess,'./TSP-checkpoints-{}'.format(loss_type));
         
         # Run for a number of epochs
         for epoch_i in range(epochs_n):
@@ -753,12 +760,15 @@ def main_v2():
             train_loader.reset()
             test_loader.reset()
 
-            print("Training model...")
+            print("Training model...", flush=True)
             for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), train_batches_per_epoch):
                 run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=True, verbose=True)
             #end
 
-            print("Testing model...")
+            # Save weights
+            if save_checkpoints: save_weights(sess,'./TSP-checkpoints-{}'.format(loss_type));
+
+            print("Testing model...", flush=True)
             for (batch_i, batch) in islice(enumerate(test_loader.get_batches(32)), test_batches_per_epoch):
                 run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, verbose=True)
             #end
