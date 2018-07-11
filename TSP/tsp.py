@@ -429,7 +429,8 @@ def run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, ve
 
     if verbose:
         # Print stats
-        print('Epoch {epoch_i} Batch {batch_i}\t|\t(n,m,batch size)=({n},{m},{batch_size})|\t(Loss,Acc)=({loss:.3f},{acc:.3f})'.format(
+        print('{train_or_test} Epoch {epoch_i} Batch {batch_i}\t|\t(n,m,batch size)=({n},{m},{batch_size})|\t(Loss,Acc)=({loss:.3f},{acc:.3f})'.format(
+            train_or_test = 'Train' if train else 'Test',
             epoch_i = epoch_i,
             batch_i = batch_i,
             loss = loss,
@@ -748,6 +749,9 @@ def main_v2():
         
         # Run for a number of epochs
         for epoch_i in range(epochs_n):
+
+            train_loader.reset()
+            test_loader.reset()
 
             print("Training model...")
             for (batch_i, batch) in islice(enumerate(train_loader.get_batches(32)), train_batches_per_epoch):
