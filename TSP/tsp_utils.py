@@ -18,9 +18,10 @@ STDERR = 2
 
 class InstanceLoader(object):
 
-    def __init__(self,path):
+    def __init__(self,path,target_cost_dev):
         self.path = path
         self.filenames = [ path + '/' + x for x in os.listdir(path) ]
+        self.target_cost_dev = target_cost_dev
         self.reset()
     #end
 
@@ -32,7 +33,7 @@ class InstanceLoader(object):
         #end
     #end
 
-    def create_batch(self,instances):
+    def create_batch(instances, target_cost_dev):
 
         # n_instances: number of instances
         n_instances = len(instances)
@@ -46,36 +47,56 @@ class InstanceLoader(object):
         # total_edges: total number of edges among all instances
         total_edges     = sum(n_edges)
 
-        # Compute grouped matrices Ma_all, Me_all and Mw_all
-        M           = np.zeros((total_edges,total_vertices))
-        W           = np.zeros((total_edges,1))
-        edges_mask  = np.zeros(total_edges)
+        # Compute matrices M, W, CV, CE
+        # and vectors edges_mask and route_exists
+        M               = np.zeros((total_edges,total_vertices))
+        W               = np.zeros((total_edges,1))
+        CV              = np.zeros((total_vertices,1))
+        CE              = np.zeros((total_edges,1))
+        edges_mask      = np.zeros(total_edges)
+        route_exists    = np.zeros(n_instances)
         for (i,(Ma,Mw,route)) in enumerate(instances):
             
+            # Get the number of vertices (n) and edges (m) in this graph
+            n, m = n_vertices[i], n_edges[i]
+            # Get the number of vertices (n_acc) and edges (m_acc) up until the i-th graph
             n_acc = sum(n_vertices[0:i])
             m_acc = sum(n_edges[0:i])
 
+            # Get the list of edges in this graph
             edges = list(zip(np.nonzero(Ma)[0], np.nonzero(Ma)[1]))
 
+            # Get the list of edges in the optimal TSP route for this graph
             route_edges = [ (min(x,y),max(x,y)) for (x,y) in zip(route,route[1:]+route[0:1]) ]
 
+            # Compute the optimal (normalizes) TSP cost for this graph
+            cost = sum([ Mw[x,y] for (x,y) in route_edges ]) / n
+
+            # Choose a target cost and fill CV and CE with it
+            target_cost = np.random.normal(cost, target_cost_dev)
+            CV[n_acc:n_acc+n,0] = target_cost
+            CE[m_acc:m_acc+m,0] = target_cost
+
+            route_exists[i] = (cost <= target_cost).astype(int)
+
+            # Populate M, W and edges_mask
             for e,(x,y) in enumerate(edges):
                 M[m_acc+e,n_acc+x] = 1
                 M[m_acc+e,n_acc+y] = 1
-                W[m_acc+e] = 1
-
+                W[m_acc+e] = Mw[x,y]
                 if (x,y) in route_edges:
                     edges_mask[m_acc+e] = 1
                 #end
             #end
+
         #end
 
-        return M, W, edges_mask, n_vertices, n_edges
+        return M, W, CV, CE, edges_mask, route_exists, n_vertices, n_edges
     #end
 
     def get_batches(self, batch_size):
         for i in range( len(self.filenames) // batch_size ):
-            yield self.create_batch(list(self.get_instances(batch_size)))
+            yield InstanceLoader.create_batch(list(self.get_instances(batch_size)), self.target_cost_dev)
         #end
     #end
 
@@ -83,46 +104,6 @@ class InstanceLoader(object):
         random.shuffle( self.filenames )
         self.index = 0
     #end
-#end
-
-def solve_old(Ma, Mw):
-    """
-        Find the optimal TSP tour given vertex adjacencies given by the binary
-        matrix Ma and edge weights given by the real-valued matrix W
-    """
-
-    n = Ma.shape[0]
-
-    # Create a routing model
-    routing = pywrapcp.RoutingModel(n, 1)
-
-    def dist(i,j):
-        return Mw[i,j]
-    #end
-
-    # Define edge weights
-    routing.SetArcCostEvaluatorOfAllVehicles(dist)
-
-    # Remove connections where Ma[i,j] = 0
-    for i in range(n):
-        for j in range(n):
-            if Ma[i,j] == 0:
-                routing.NextVar(i).RemoveValue(j)
-            #end
-        #end
-    #end
-
-    assignment = routing.Solve()
-
-    def route_generator():
-        index = 0
-        for i in range(n):
-            yield index
-            index = assignment.Value(routing.NextVar(index))
-        #end
-    #end
-
-    return list(route_generator()) if assignment is not None else []
 #end
 
 def solve(Ma, Mw):
