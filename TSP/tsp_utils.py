@@ -33,7 +33,7 @@ class InstanceLoader(object):
         #end
     #end
 
-    def create_batch(instances, target_cost_dev):
+    def create_batch(instances, target_cost_dev=None, target_cost=None):
 
         # n_instances: number of instances
         n_instances = len(instances)
@@ -73,11 +73,12 @@ class InstanceLoader(object):
             cost = sum([ Mw[x,y] for (x,y) in route_edges ]) / n
 
             # Choose a target cost and fill CV and CE with it
-            target_cost = np.random.normal(cost, target_cost_dev)
-            CV[n_acc:n_acc+n,0] = target_cost
-            CE[m_acc:m_acc+m,0] = target_cost
+            delta = abs(np.random.normal(0, target_cost_dev))
+            delta *= (+1) if i%2 == 0 else (-1)
+            CV[n_acc:n_acc+n,0] = target_cost if target_cost is not None else cost + delta 
+            CE[m_acc:m_acc+m,0] = target_cost if target_cost is not None else cost + delta 
 
-            route_exists[i] = (cost <= target_cost).astype(int)
+            route_exists[i] = 1 if delta >= 0 else 0
 
             # Populate M, W and edges_mask
             for e,(x,y) in enumerate(edges):
@@ -88,7 +89,6 @@ class InstanceLoader(object):
                     edges_mask[m_acc+e] = 1
                 #end
             #end
-
         #end
 
         return M, W, CV, CE, edges_mask, route_exists, n_vertices, n_edges
@@ -155,6 +155,7 @@ def create_graph_metric(n, bins, connectivity=1):
 
     # Solve
     route = solve(Ma,Mw)
+    if route == []: print('Unsolvable');
 
     # Check if route contains edges which are not in the graph and add them
     for (i,j) in [ (i,j) for (i,j) in zip(route,route[1:]+route[0:1]) if Ma[i,j] == 0 ]:
@@ -267,19 +268,26 @@ def create_dataset_metric(nmin, nmax, conn_min, conn_max, path, bins=10**6, conn
         os.makedirs(path)
     #end if
 
+    route_cost = np.zeros(samples)
+
     solvable = 0
     for i in range(samples):
 
-        solution = []
-        while solution == []:
+        route = []
+        while route == []:
             n = np.random.randint(nmin,nmax)
             connectivity = np.random.uniform(conn_min,conn_max)
-            Ma,Mw,solution,_ = create_graph_metric(n,bins,connectivity)
+            Ma,Mw,route,nodes = create_graph_metric(n,bins,connectivity)
+            # Compute route cost
+            route_cost[i] = sum([ Mw[min(i,j),max(i,j)] for (i,j) in zip(route,route[1:]+route[:1]) ]) / n
         #end
 
-        write_graph(Ma,Mw,solution,"{}/{}.graph".format(path,i))
+        write_graph(Ma,Mw,route,"{}/{}.graph".format(path,i))
         if (i-1) % (samples//10) == 0:
-            print('{}% Complete'.format(np.round(100*i/samples)))
+            print('{}% Complete'.format(np.round(100*i/samples)), flush=True)
         #end
     #end
+
+    # Return mean and standard deviation for the set of (normalized) route costs
+    return np.mean(route_cost), np.std(route_cost)
 #end
