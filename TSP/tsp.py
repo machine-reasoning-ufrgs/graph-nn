@@ -801,8 +801,8 @@ def main_v2():
     print('(Mean,Std.Dev) Normalized test route cost: ({mean:.3f},{dev:.3f})'.format(mean=np.mean(test_route_costs),dev=np.std(test_route_costs)), flush=True)
 
     # Update target cost deviation for train and test loaders
-    train_loader.target_cost_dev    = 1*np.std(train_route_costs)
-    test_loader.target_cost_dev     = 1*np.std(test_route_costs)
+    train_loader.target_cost_dev    = 0.1*np.std(train_route_costs)
+    test_loader.target_cost_dev     = 0.1*np.std(test_route_costs)
 
     # Build model
     print("Building model ...", flush=True)
