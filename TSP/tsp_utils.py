@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 from concorde.tsp import TSPSolver
 from redirector import Redirector
+from functools import reduce
 
 STDOUT = 1
 STDERR = 2
@@ -73,10 +74,18 @@ class InstanceLoader(object):
             cost = sum([ Mw[x,y] for (x,y) in route_edges ]) / n
 
             # Choose a target cost and fill CV and CE with it
-            delta = abs(np.random.normal(0, target_cost_dev))
-            delta *= (+1) if i%2 == 0 else (-1)
-            CV[n_acc:n_acc+n,0] = target_cost if target_cost is not None else cost + delta 
-            CE[m_acc:m_acc+m,0] = target_cost if target_cost is not None else cost + delta 
+            if target_cost is not None:
+                delta = target_cost - cost
+
+                CV[n_acc:n_acc+n,0] = target_cost
+                CE[m_acc:m_acc+m,0] = target_cost
+            else:
+                delta = abs(np.random.normal(0, target_cost_dev))
+                delta *= (+1) if i%2 == 0 else (-1)
+
+                CV[n_acc:n_acc+n,0] = cost + delta 
+                CE[m_acc:m_acc+m,0] = cost + delta
+            #end
 
             route_exists[i] = 1 if delta >= 0 else 0
 
@@ -96,7 +105,9 @@ class InstanceLoader(object):
 
     def get_batches(self, batch_size):
         for i in range( len(self.filenames) // batch_size ):
-            yield InstanceLoader.create_batch(list(self.get_instances(batch_size)), self.target_cost_dev)
+            instances = list(self.get_instances(batch_size))
+            instances = reduce(lambda x,y: x+y, zip(instances,instances))
+            yield InstanceLoader.create_batch(instances, self.target_cost_dev)
         #end
     #end
 

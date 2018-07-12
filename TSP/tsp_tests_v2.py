@@ -5,6 +5,7 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 
 import tensorflow as tf
 import numpy as np
+from numpy import linalg as LA
 from matplotlib import pyplot as plt
 from graphnn_refactored import GraphNN
 from tsp import build_network_v2
@@ -20,8 +21,8 @@ def extract_solution(sess, model, instance, time_steps=25):
 
     # Create batch of size 1
     route_cost = sum([ Mw[min(i,j),max(i,j)] for (i,j) in zip(route,route[1:]+route[:1]) ]) / len(nodes)
-    target_cost = 1.5*route_cost
-    batch = InstanceLoader.create_batch([instance], target_cost=target_cost)
+    target_cost = 2*route_cost
+    batch = InstanceLoader.create_batch([(Ma,Mw,route)], target_cost=target_cost)
     M, W, CV, CE, edges_mask, route_exists, n_vertices, n_edges = batch
 
     # Define feed dict
@@ -41,18 +42,23 @@ def extract_solution(sess, model, instance, time_steps=25):
 
     # Perform 2-clustering
     two_clustering = KMeans(n_clusters=2).fit(edge_embeddings)
-    if sum(two_clustering.labels_) > len(edges)//2:
-        two_clustering.labels_ = 1-two_clustering.labels_ 
+    if sum(two_clustering.labels_) < len(edges)//2:
+        pos_indices = [ i for i,x in enumerate(two_clustering.labels_) if x==1 ]
+        pos_center = two_clustering.cluster_centers_[0]
+    else:
+        pos_indices = [ i for i,x in enumerate(two_clustering.labels_) if x==0 ]
+        pos_center = two_clustering.cluster_centers_[1]
     #end
 
+    # Get the indices n positive embeddings closest to their center
+    top_n = sorted(pos_indices, key=lambda i: LA.norm(edge_embeddings[i,:]-pos_center) )[:n]
+
     print('')
-    print('Is there a route with cost < {}? R: {}'.format(target_cost, 'Yes' if route_exists[0]==1 else 'No'))
+    print('Is there a route with cost < {target_cost:.3f}? R: {R}'.format(target_cost=target_cost, R='Yes' if route_exists[0]==1 else 'No'))
     print('Prediction: {}'.format('Yes' if predictions[0] >= 0.5 else 'No'))
-    print('# Nodes in route: {}'.format(len([x for x in two_clustering.labels_ if x==1])))
-    print('# Nodes not in route: {}'.format(len([x for x in two_clustering.labels_ if x==0])))
 
     # Get list of predicted edges
-    predicted_edges = [ (i,j) for (i,j),label in zip(edges, two_clustering.labels_) if label==1 ]
+    predicted_edges = [ (i,j) for e,(i,j) in enumerate(edges) if e in top_n ]
 
     return predicted_edges
 
@@ -90,11 +96,14 @@ if __name__ == '__main__':
             x0,y0 = nodes[i]
             x1,y1 = nodes[j]
             if (i,j) in predicted_edges:
-                plt.plot([x0,x1],[y0,y1], 'b-', linewidth=1)
+                plt.plot([x0,x1],[y0,y1], 'b-', linewidth=1, zorder=2)
             else:
-                plt.plot([x0,x1],[y0,y1], 'r--', linewidth=0.5)
+                dummy = 0
+                #plt.plot([x0,x1],[y0,y1], 'r--', linewidth=0.5, zorder=1)
             #end
         #end
+
+        plt.scatter(x=nodes[:,0], y=nodes[:,1], zorder=3)
 
         plt.show()
     #end

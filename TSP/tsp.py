@@ -13,6 +13,7 @@ from graphnn_refactored import GraphNN
 from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
 from tsp_utils import InstanceLoader, create_dataset_metric
+from functools import reduce
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -771,7 +772,7 @@ def main_v2():
     target_cost_dev         = 0.01
 
     epochs_n                = 100
-    batch_size              = 32
+    batch_size              = 16
     train_batches_per_epoch = 128
     test_batches_per_epoch  = 32
     
@@ -819,37 +820,51 @@ def main_v2():
         # Restore saved weights
         if load_checkpoints: load_weights(sess,'./TSP-checkpoints-decision');
         
-        # Run for a number of epochs
-        for epoch_i in range(epochs_n):
+        with open('TSP-log.dat','w') as logfile:
+            # Run for a number of epochs
+            for epoch_i in range(epochs_n):
 
-            train_loader.reset()
-            test_loader.reset()
+                train_loader.reset()
+                test_loader.reset()
 
-            train_loss  = np.zeros(train_batches_per_epoch)
-            train_acc   = np.zeros(train_batches_per_epoch)
-            train_sat  = np.zeros(train_batches_per_epoch)
-            train_pred = np.zeros(train_batches_per_epoch)
+                train_loss  = np.zeros(train_batches_per_epoch)
+                train_acc   = np.zeros(train_batches_per_epoch)
+                train_sat  = np.zeros(train_batches_per_epoch)
+                train_pred = np.zeros(train_batches_per_epoch)
 
-            test_loss   = np.zeros(test_batches_per_epoch)
-            test_acc    = np.zeros(test_batches_per_epoch)
-            test_sat   = np.zeros(test_batches_per_epoch)
-            test_pred  = np.zeros(test_batches_per_epoch)
+                test_loss   = np.zeros(test_batches_per_epoch)
+                test_acc    = np.zeros(test_batches_per_epoch)
+                test_sat   = np.zeros(test_batches_per_epoch)
+                test_pred  = np.zeros(test_batches_per_epoch)
 
-            print("Training model...", flush=True)
-            for (batch_i, batch) in islice(enumerate(train_loader.get_batches(batch_size)), train_batches_per_epoch):
-                train_loss[batch_i], train_acc[batch_i], train_sat[batch_i], train_pred[batch_i] = run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=True, verbose=True)
+                print("Training model...", flush=True)
+                for (batch_i, batch) in islice(enumerate(train_loader.get_batches(batch_size)), train_batches_per_epoch):
+                    train_loss[batch_i], train_acc[batch_i], train_sat[batch_i], train_pred[batch_i] = run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=True, verbose=True)
+                #end
+                summarize_epoch(epoch_i,train_loss,train_acc,train_sat,train_pred,train=True)
+
+                print("Testing model...", flush=True)
+                for (batch_i, batch) in islice(enumerate(test_loader.get_batches(batch_size)), test_batches_per_epoch):
+                    test_loss[batch_i], test_acc[batch_i], test_sat[batch_i], test_pred[batch_i] = run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, verbose=True)
+                #end
+                summarize_epoch(epoch_i,test_loss,test_acc,test_sat,test_pred,train=False)
+
+                # Save weights
+                if save_checkpoints: save_weights(sess,'./TSP-checkpoints-decision');
+
+                logfile.write('{trloss} {tracc} {trsat} {trpred} {tstloss} {tstacc} {tstsat} {tstpred}\n'.format(
+                    trloss = np.mean(train_loss),
+                    tracc = np.mean(train_acc),
+                    trsat = np.mean(train_sat),
+                    trpred = np.mean(train_pred),
+                    tstloss = np.mean(test_loss),
+                    tstacc = np.mean(test_acc),
+                    tstsat = np.mean(test_sat),
+                    tstpred = np.mean(test_pred),
+                    )
+                )
+                logfile.flush()
             #end
-            summarize_epoch(epoch_i,train_loss,train_acc,train_sat,train_pred,train=True)
-
-            print("Testing model...", flush=True)
-            for (batch_i, batch) in islice(enumerate(test_loader.get_batches(batch_size)), test_batches_per_epoch):
-                test_loss[batch_i], test_acc[batch_i], test_sat[batch_i], test_pred[batch_i] = run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, verbose=True)
-            #end
-            summarize_epoch(epoch_i,test_loss,test_acc,test_sat,test_pred,train=False)
-
-            # Save weights
-            if save_checkpoints: save_weights(sess,'./TSP-checkpoints-decision');
-
         #end
     #end
 #end
