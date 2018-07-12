@@ -13,18 +13,16 @@ from graphnn_refactored import GraphNN
 from mlp import Mlp
 from util import timestamp, memory_usage, dense_to_sparse, load_weights, save_weights
 from tsp_utils import InstanceLoader, create_dataset_metric
+from functools import reduce
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 def build_network(d = 128):
 
     # Define hyperparameters
-    params = {
-        'd': d,
-        'learning_rate': 2e-5,
-        'l2norm_scaling': 1e-10,
-        'global_norm_gradient_clipping_ratio': 0.65
-    }
+    learning_rate = 2e-5
+    l2norm_scaling = 1e-10
+    global_norm_gradient_clipping_ratio = 0.65
 
     # Define placeholder for routes' edges (a mask of edges per problem)
     edges_mask = tf.placeholder( tf.float32, [ None ], name = 'edges_mask' )
@@ -39,9 +37,9 @@ def build_network(d = 128):
     gnn = GraphNN(
         {
             # V is the set of vertices
-            "V": params['d'],
+            "V": d,
             # E is the set of edges
-            "E": params['d']
+            "E": d
         },
         {
             # M is a E×V adjacency matrix connecting each edge to the vertices it is connected to
@@ -170,14 +168,14 @@ def build_network(d = 128):
         )
 
     # Define optimizer
-    optimizer = tf.train.AdamOptimizer(name='Adam', learning_rate=params['learning_rate'])
+    optimizer = tf.train.AdamOptimizer(name='Adam', learning_rate=learning_rate)
 
     # Compute cost relative to L2 normalization
     vars_cost = tf.add_n([ tf.nn.l2_loss(var) for var in tf.trainable_variables() ])
     
     # Define gradients and train step
     for loss_type in ['cost','edges']:
-        grads, _ = tf.clip_by_global_norm(tf.gradients(GNN[loss_type+'_loss'] + tf.multiply(vars_cost, params['l2norm_scaling']),tf.trainable_variables()),params['global_norm_gradient_clipping_ratio'])
+        grads, _ = tf.clip_by_global_norm(tf.gradients(GNN[loss_type+'_loss'] + tf.multiply(vars_cost, l2norm_scaling),tf.trainable_variables()),global_norm_gradient_clipping_ratio)
         GNN['train_step_{}'.format(loss_type)] = optimizer.apply_gradients(zip(grads, tf.trainable_variables()))
     #end
     
@@ -257,10 +255,9 @@ def compute_acc(batch, e_prob):
     return np.mean(degree_acc), np.mean(visited_acc), np.mean(conn_comp_acc), np.mean(precision), np.mean(recall), np.mean(true_negative_rate)
 #end
 
-if __name__ == '__main__':
-    
+def main():
     create_datasets     = False
-    load_checkpoints    = False
+    load_checkpoints    = True
     save_checkpoints    = True
 
     d                       = 128
@@ -347,8 +344,8 @@ if __name__ == '__main__':
                     M, W, edges_mask, n_vertices, n_edges = batch
 
                     # Run one SGD iteration and fetch loss and cost deviation
-                    _, train_stats['cost_loss'][batch_i], train_stats['edges_loss'][batch_i], train_stats['deviation'][batch_i], e_prob = sess.run(
-                        [ GNN['train_step_{}'.format(loss_type)], GNN['cost_loss'], GNN['edges_loss'], GNN['deviation'], GNN['E_prob'] ],
+                    _, _, train_stats['cost_loss'][batch_i], train_stats['edges_loss'][batch_i], train_stats['deviation'][batch_i], e_prob = sess.run(
+                        [ GNN['train_step_{}'.format(loss_type)], GNN['train_step_cost'], GNN['cost_loss'], GNN['edges_loss'], GNN['deviation'], GNN['E_prob'] ],
                         feed_dict = 
                         {
                             GNN['gnn'].matrix_placeholders['M']: M,
@@ -533,4 +530,345 @@ if __name__ == '__main__':
             #end
         #end
     #end
+#end
+
+###########################
+# OLD CODE   ^            #
+###########################
+
+###########################
+# NEW CODE   v            #
+###########################
+
+def build_network_v2(d):
+
+    # Define hyperparameters
+    d = d
+    learning_rate = 2e-5
+    l2norm_scaling = 1e-10
+    global_norm_gradient_clipping_ratio = 0.65
+
+    # Define a placeholder for the answers to the decision problems
+    route_exists = tf.placeholder( tf.float32, shape = (None), name = 'route_exists' )
+    # Define placeholders for the list of number of vertices and edges per instance
+    n_vertices  = tf.placeholder( tf.int32, shape = (None,), name = 'n_vertices')
+    n_edges     = tf.placeholder( tf.int32, shape = (None,), name = 'edges')
+
+    # Define GNN dictionary
+    GNN = {}
+
+    # Define Graph neural network
+    gnn = GraphNN(
+        {
+            # V is the set of vertex embeddings
+            'V': d,
+            # E is the set of edge embeddings
+            'E': d
+        },
+        {
+            # M is a E×V adjacency matrix connecting each edge to the vertices it is connected to
+            'M': ('E','V'),
+            # W is a column matrix of shape |E|×1 where W[i,1] is the weight of the i-th edge
+            'W': ('E',1),
+            # CV and CE are column matrices of shapes |V|×1 and |E|×1
+            # respectively whose function is to send to each vertex and each
+            # edge embedding in the i-th problem the same target route cost
+            # c_i (remember: we want to decide whether there is a route with
+            # cost ⩽ c)
+            'CV': ('V',1),
+            'CE': ('E',1)
+        },
+        {
+            # Vmsg is a MLP which computes messages from vertex embeddings to edge embeddings
+            'Vmsg': ('V','E'),
+            # Emsg is a MLP which computes messages from edge embeddings to vertex embeddings
+            'Emsg': ('E','V')
+        },
+        {
+            # V(t+1) ← Vu( Mᵀ × Emsg(E(t)), CV )
+            'V': [
+                {
+                    'mat': 'M',
+                    'msg': 'Emsg',
+                    'transpose?': True,
+                    'var': 'E'
+                },
+                {
+                    'mat': 'CV'
+                }
+            ],
+            # E(t+1) ← Eu( M × Vmsg(V(t)), W, CE )
+            'E': [
+                {
+                    'mat': 'M',
+                    'msg': 'Vmsg',
+                    'var': 'V'
+                },
+                {
+                    'mat': 'W'
+                },
+                {
+                    'mat': 'CE'
+                }
+            ]
+        },
+        name='TSP'
+    )
+
+    # Populate GNN dictionary
+    GNN['gnn']          = gnn
+    GNN['route_exists'] = route_exists
+    GNN['n_vertices']   = n_vertices
+    GNN['n_edges']      = n_edges
+
+    # Define E_vote, which will compute one logit for each edge
+    E_vote_MLP = Mlp(
+        layer_sizes = [ d for _ in range(3) ],
+        activations = [ tf.nn.relu for _ in range(3) ],
+        output_size = 1,
+        name = 'E_vote',
+        name_internal_layers = True,
+        kernel_initializer = tf.contrib.layers.xavier_initializer(),
+        bias_initializer = tf.zeros_initializer()
+        )
+    vote_bias = tf.get_variable(initializer=tf.zeros_initializer(), shape=(), dtype=tf.float32, name='vote_bias')
+
+    # Get the last embeddings
+    E_n = gnn.last_states['E'].h
+    # Compute a vote for each embedding
+    E_vote = tf.reshape(E_vote_MLP(E_n), [-1])
+
+    # Compute the number of problems in the batch
+    num_problems = tf.shape(n_vertices)[0]
+    # n_edges_acc[i] is the number of edges in the batch up to the i-th instance
+    n_edges_acc = tf.map_fn(lambda i: tf.reduce_sum(tf.gather(n_edges, tf.range(0,i))), tf.range(0,num_problems))
+
+    # Compute a prediction for each problem in the batch
+    _, predictions = tf.while_loop(
+        lambda i, predictions: tf.less(i, num_problems),
+        lambda i, predictions:
+            (
+                (i+1),
+                predictions.write(
+                    i,
+                    tf.reduce_mean(tf.gather(E_vote, tf.range(n_edges_acc[i], n_edges_acc[i] + n_edges[i])))
+                )
+            ),
+        [0, tf.TensorArray(size=num_problems, dtype=tf.float32)]
+        )
+    predictions = predictions.stack() + vote_bias
+    GNN['predictions'] = tf.sigmoid(predictions)
+
+    # Define loss
+    GNN['loss'] = tf.losses.sigmoid_cross_entropy(multi_class_labels=route_exists, logits=predictions)
+
+    # Define accuracy
+    GNN['acc'] = tf.reduce_mean(tf.cast(tf.equal(route_exists, tf.round(tf.sigmoid(predictions))), tf.float32))
+
+    # Define optimizer
+    optimizer = tf.train.AdamOptimizer(name='Adam', learning_rate=learning_rate)
+
+    # Compute cost relative to L2 normalization
+    vars_cost = tf.add_n([ tf.nn.l2_loss(var) for var in tf.trainable_variables() ])
+    
+    # Define gradients and train step
+    grads, _ = tf.clip_by_global_norm(tf.gradients(GNN['loss'] + tf.multiply(vars_cost, l2norm_scaling),tf.trainable_variables()),global_norm_gradient_clipping_ratio)
+    GNN['train_step'] = optimizer.apply_gradients(zip(grads, tf.trainable_variables()))
+    
+    # Return GNN dictionary
+    return GNN
+#end
+
+def run_batch_v2(sess, model, batch, batch_i, epoch_i, time_steps, train=False, verbose=True):
+    
+    """
+        Obtain:
+            M: an adjacency matrix ∈ {0,1}^(|E|×|V|) between edges and vertices
+            W: a column matrix ∈ ℜ^(|E|×1) with the weight of each edge
+            edges_mask: a binary mask ∈ {0,1}^|E| marking edges in the solution with 1s and 0s otherwise
+            n_vertices: a vector with the number of vertices for each problem in the batch
+            n_edges: a vector with the number of edges for each problem in the batch
+    """
+    M, W, CV, CE, edges_mask, route_exists, n_vertices, n_edges = batch
+
+    # Compute the number of problems
+    n_problems = n_vertices.shape[0]
+
+    # Define feed dict
+    feed_dict = {
+        model['gnn'].matrix_placeholders['M']: M,
+        model['gnn'].matrix_placeholders['W']: W,
+        model['gnn'].matrix_placeholders['CV']: CV,
+        model['gnn'].matrix_placeholders['CE']: CE,
+        model['gnn'].time_steps: time_steps,
+        model['route_exists']: route_exists,
+        model['n_vertices']: n_vertices,
+        model['n_edges']: n_edges
+    }
+
+    if train:
+        outputs = [model['train_step'], model['loss'], model['acc'], model['predictions']]
+    else:
+        outputs = [model['loss'], model['acc'], model['predictions']]
+    #end
+
+    # Run model
+    loss, acc, predictions = sess.run(outputs, feed_dict = feed_dict)[-3:]
+
+    if verbose:
+        # Print stats
+        print('{train_or_test} Epoch {epoch_i} Batch {batch_i}\t|\t(n,m,batch size)=({n},{m},{batch_size})\t|\t(Loss,Acc)=({loss:.3f},{acc:.3f})\t|\tAvg. (Sat,Prediction)=({avg_sat:.3f},{avg_pred:.3f})'.format(
+            train_or_test = 'Train' if train else 'Test',
+            epoch_i = epoch_i,
+            batch_i = batch_i,
+            loss = loss,
+            acc = acc,
+            n = np.sum(n_vertices),
+            m = np.sum(n_edges),
+            batch_size = n_vertices.shape[0],
+            avg_sat = np.mean(route_exists),
+            avg_pred = np.mean(np.round(predictions))
+            ),
+            flush = True
+        )
+    #end
+
+    return loss, acc, np.mean(route_exists), np.mean(predictions)
+#end
+
+def summarize_epoch(epoch_i, loss, acc, sat, pred, train=False):
+    print('{train_or_test} Epoch {epoch_i} Average\t|\t(Loss,Acc)=({loss:.3f},{acc:.3f})\t|\tAvg. (Sat,Pred)=({avg_sat:.3f},{avg_pred:.3f})'.format(
+        train_or_test = 'Train' if train else 'Test',
+        epoch_i = epoch_i,
+        loss = np.mean(loss),
+        acc = np.mean(acc),
+        avg_sat = np.mean(sat),
+        avg_pred = np.mean(pred)
+        ),
+        flush = True
+    )
+#end
+
+def ensure_datasets(nmin, nmax, conn_min, conn_max, bins, batch_size, train_batches_per_epoch, test_batches_per_epoch):
+
+    train_samples = batch_size*train_batches_per_epoch
+    test_samples = batch_size*test_batches_per_epoch
+    
+    if not os.path.isdir('train'):
+        print('Creating {} Train instances'.format(train_samples), flush=True)
+        create_dataset_metric(nmin, nmax, conn_min, conn_max, path='train', bins=bins, samples=train_samples)
+    #end
+
+    if not os.path.isdir('test'):
+        print('Creating {} Test instances'.format(test_samples), flush=True)
+        create_dataset_metric(nmin, nmax, conn_min, conn_max, path='test', bins=bins, samples=test_samples)
+    #end
+#end
+
+def main_v2():
+
+    d                       = 128
+    time_steps              = 25
+    target_cost_dev         = 0.01
+
+    epochs_n                = 100
+    batch_size              = 16
+    train_batches_per_epoch = 128
+    test_batches_per_epoch  = 32
+    
+    load_checkpoints        = False
+    save_checkpoints        = True
+
+    nmin, nmax              = 20, 40
+    conn_min, conn_max      = 0.25, 0.25
+    bins                    = 10**6
+    
+    # Ensure that train and test datasets exist and create if inexistent
+    ensure_datasets(nmin,nmax,conn_min,conn_max,bins,batch_size,train_batches_per_epoch,test_batches_per_epoch)
+
+    # Create train and test loaders
+    train_loader    = InstanceLoader("train", target_cost_dev=0)
+    test_loader     = InstanceLoader("test", target_cost_dev=0)
+
+    print('Computing mean and standard deviation for the normalized route cost of training and test instances ...', flush=True)
+    train_route_costs   = [ sum([ Mw[min(i,j),max(i,j)] for (i,j) in zip(route,route[1:]+route[:1]) ]) / Ma.shape[0] for (Ma,Mw,route) in train_loader.get_instances(train_batches_per_epoch*batch_size) ]
+    test_route_costs    = [ sum([ Mw[min(i,j),max(i,j)] for (i,j) in zip(route,route[1:]+route[:1]) ]) / Ma.shape[0] for (Ma,Mw,route) in test_loader.get_instances(test_batches_per_epoch*batch_size) ]
+
+    # Reset train and test loaders
+    train_loader.reset()
+    test_loader.reset()
+
+    print('(Mean,Std.Dev) Normalized train route cost: ({mean:.3f},{dev:.3f})'.format(mean=np.mean(train_route_costs),dev=np.std(train_route_costs)), flush=True)
+    print('(Mean,Std.Dev) Normalized test route cost: ({mean:.3f},{dev:.3f})'.format(mean=np.mean(test_route_costs),dev=np.std(test_route_costs)), flush=True)
+
+    # Update target cost deviation for train and test loaders
+    train_loader.target_cost_dev    = 0.1*np.std(train_route_costs)
+    test_loader.target_cost_dev     = 0.1*np.std(test_route_costs)
+
+    # Build model
+    print("Building model ...", flush=True)
+    GNN = build_network_v2(d)
+
+    # Disallow GPU use
+    config = tf.ConfigProto( device_count = {"GPU":0})
+    with tf.Session(config=config) as sess:
+
+        # Initialize global variables
+        print("Initializing global variables ... ", flush=True)
+        sess.run( tf.global_variables_initializer() )
+
+        # Restore saved weights
+        if load_checkpoints: load_weights(sess,'./TSP-checkpoints-decision');
+        
+        with open('TSP-log.dat','w') as logfile:
+            # Run for a number of epochs
+            for epoch_i in range(epochs_n):
+
+                train_loader.reset()
+                test_loader.reset()
+
+                train_loss  = np.zeros(train_batches_per_epoch)
+                train_acc   = np.zeros(train_batches_per_epoch)
+                train_sat  = np.zeros(train_batches_per_epoch)
+                train_pred = np.zeros(train_batches_per_epoch)
+
+                test_loss   = np.zeros(test_batches_per_epoch)
+                test_acc    = np.zeros(test_batches_per_epoch)
+                test_sat   = np.zeros(test_batches_per_epoch)
+                test_pred  = np.zeros(test_batches_per_epoch)
+
+                print("Training model...", flush=True)
+                for (batch_i, batch) in islice(enumerate(train_loader.get_batches(batch_size)), train_batches_per_epoch):
+                    train_loss[batch_i], train_acc[batch_i], train_sat[batch_i], train_pred[batch_i] = run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=True, verbose=True)
+                #end
+                summarize_epoch(epoch_i,train_loss,train_acc,train_sat,train_pred,train=True)
+
+                print("Testing model...", flush=True)
+                for (batch_i, batch) in islice(enumerate(test_loader.get_batches(batch_size)), test_batches_per_epoch):
+                    test_loss[batch_i], test_acc[batch_i], test_sat[batch_i], test_pred[batch_i] = run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, verbose=True)
+                #end
+                summarize_epoch(epoch_i,test_loss,test_acc,test_sat,test_pred,train=False)
+
+                # Save weights
+                if save_checkpoints: save_weights(sess,'./TSP-checkpoints-decision');
+
+                logfile.write('{trloss} {tracc} {trsat} {trpred} {tstloss} {tstacc} {tstsat} {tstpred}\n'.format(
+                    trloss = np.mean(train_loss),
+                    tracc = np.mean(train_acc),
+                    trsat = np.mean(train_sat),
+                    trpred = np.mean(train_pred),
+                    tstloss = np.mean(test_loss),
+                    tstacc = np.mean(test_acc),
+                    tstsat = np.mean(test_sat),
+                    tstpred = np.mean(test_pred),
+                    )
+                )
+                logfile.flush()
+            #end
+        #end
+    #end
+#end
+
+if __name__ == '__main__':
+    main_v2()
 #end
