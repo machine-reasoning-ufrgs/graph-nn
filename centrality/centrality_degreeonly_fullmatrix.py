@@ -135,24 +135,14 @@ def build_network(d):
 	# Get the last embeddings
 	N_n = gnn.last_states["N"].h
 	#print("N_n shape:" +str(N_n.shape))
-	
-#	M_prob_exp = tf.expand_dims(N_n, 0)
-#	M_1 = tf.tile( M_prob_exp, (n,1,1))
-#	
-#	M_prob_exp_trans = tf.transpose( M_prob_exp, (1,0,2))
-#	M_2 = tf.tile( M_prob_exp_trans, (1, n, 1))
-#	
-#	M1M2 = tf.concat([M_1, M_2], 2)
-#	
-#	predicted_matrix = comp_MLP( M1M2 )
-#	predicted_matrix = tf.squeeze( predicted_matrix )  
+	  
 
 	# Reorganize votes' result to obtain a prediction for each problem instance
-	def _vote_while_cond(i, acc_arr, cost_arr, n_acc):
+	def _vote_while_cond(i, acc_arr, cost_arr, rank10_labels, rank10_predicted, n_acc):
 		return tf.less( i, p )
 	#end _vote_while_cond
 
-	def _vote_while_body(i, acc_arr, cost_arr, n_acc):
+	def _vote_while_body(i, acc_arr, cost_arr, rank10_labels, rank10_predicted, n_acc):
 		# Gather the embeddings for that problem
 		#p_embeddings = tf.gather(N_n, tf.range( n_acc, tf.add(n_acc, nodes_n[i]) ))
 		p_embeddings = tf.slice( N_n, [n_acc, 0], [nodes_n[i], d]) 
@@ -170,29 +160,27 @@ def build_network(d):
 		problem_predicted_matrix = tf.squeeze( prob_matrix )
 		
 		
-		#Gather matrix containing all the labels for a given problem
-#		p_labels = tf.gather(
-#			tf.gather(
-#				labels, tf.range(  n_acc, tf.add(n_acc, nodes_n[i])),
-#				axis=1
-#			),
-#			tf.range(  n_acc, tf.add(n_acc, nodes_n[i]) ),
-#			axis=0
-#		)
 
 		p_labels = tf.slice( labels, [n_acc, n_acc], [nodes_n[i], nodes_n[i]])
+		p_predicted = tf.round( tf.sigmoid(problem_predicted_matrix ))
+		
+		s_labels = tf.reduce_sum( p_labels, axis=1 )
+		_,labels_top = tf.nn.top_k( s_labels, k=10 , sorted=True )
+		
+		s_predicted = tf.reduce_sum( p_predicted, axis=1 )
+		_, predicted_top = tf.nn.top_k( s_predicted, k=10 , sorted=True )
 		
 		#Compare labels to predicted values
 		#p_error = p_labels[n_acc:n_acc+nodes_n[i],n_acc:n_acc+nodes_n[i]]#
 		p_acc = tf.reduce_mean(
 			tf.cast(
 				tf.equal(
-					tf.round(tf.sigmoid(problem_predicted_matrix)),
-																																																																																																																																																																																																																																																																																																																																																																																																			
+					p_predicted, p_labels
 				),
 				tf.float32
 			)
 		)
+		
 		
 		#Calculate cost for this problem
 		p_cost = tf.losses.sigmoid_cross_entropy( multi_class_labels = p_labels, logits = problem_predicted_matrix)
@@ -200,20 +188,28 @@ def build_network(d):
 		# Update TensorArray
 		acc_arr = acc_arr.write( i, p_acc )
 		cost_arr = cost_arr.write(i, p_cost)
+		rank10_labels = rank10_labels.write( i, labels_top ) 
+		rank10_predicted = rank10_predicted.write( i, predicted_top )
 		
-		return tf.add( i, tf.constant( 1 ) ), acc_arr, cost_arr,tf.add( n_acc, nodes_n[i] )
+		return tf.add( i, tf.constant( 1 ) ), acc_arr, cost_arr, rank10_labels, rank10_predicted, tf.add( n_acc, nodes_n[i] )
 	#end _vote_while_body
+	
 			
 	acc_arr = tf.TensorArray( size = p, dtype = tf.float32 )
 	cost_arr = tf.TensorArray( size = p, dtype = tf.float32 )
 	
-	_, acc_arr, cost_arr, _ = tf.while_loop(
+	rank10_labels = tf.TensorArray( size = p, dtype = tf.int32 )
+	rank10_predicted = tf.TensorArray( size = p, dtype = tf.int32 )
+	
+	_, acc_arr, cost_arr, top10acc_arr, rank10_labels, rank10_predicted, _ = tf.while_loop(
 		_vote_while_cond,
 		_vote_while_body,
-		[ tf.constant( 0, dtype = tf.int32 ), acc_arr, cost_arr, tf.constant( 0, dtype = tf.int32 ) ]
+		[ tf.constant( 0, dtype = tf.int32 ), acc_arr, cost_arr, rank10_labels, rank10_predicted, tf.constant( 0, dtype = tf.int32 ) ]
 	)
 	acc_arr = acc_arr.stack()
 	cost_arr = cost_arr.stack()
+	rank10_labels = rank10_labels.stack()
+	rank10_predicted = rank10_predicted.stack()
 	
 	
 
@@ -236,9 +232,10 @@ def build_network(d):
 	
 	GNN["gnn"] = gnn
 	GNN["labels"] = labels
-	#GNN["predicted_matrix"] = predicted_matrix
 	GNN["prob_degree_predict_cost"] = prob_degree_predict_cost
 	GNN["prob_degree_predict_acc"] = prob_degree_predict_acc
+	GNN["rank10_labels"] = rank10_labels
+	GNN["rank10_predicted"] = rank10_predicted
 	GNN["loss"] = loss
 	GNN["nodes_n"] = nodes_n
 	GNN["train_step"] = train_step
@@ -270,21 +267,23 @@ def build_M_from_graph( G, undirected = True, key = None ):
 	return M_index, M_values
 #end build_M_from_graph
 
-def build_Mprobs_from_graph( matrix_probs, g_n ):
+
+def build_Mprobs_from_dict( dict_cent, g_n ):
 	Mprobs_index = []
 	Mprobs_values = []
 	for row in range(0, g_n-1):
 		for col in range(row+1, g_n):
-			if matrix_probs[row][col] == 1:
+			if dict_cent[row] > dict_cent[col]:
 				Mprobs_index.append( (row, col) )
-			else:
+				Mprobs_values.append(1)
+			elif dict_cent[col] > dict_cent[row]:
 				Mprobs_index.append( (col, row) )
-			Mprobs_values.append(1)
+				Mprobs_values.append(1)
+			
 			#end if
 		#end for
 	#end for
 	return Mprobs_index, Mprobs_values
-#end build_Mprobs_from_graph
 
 def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k = 4, smallworld_p = 0.25, powerlaw_cluster_m = 3, powerlaw_cluster_p = 0.1 ):
 	# Tries to create a graph and returns None if it fails at any point.
@@ -320,20 +319,16 @@ def _create_graph( g_n, erdos_renyi_p = 0.25, powerlaw_gamma = 3, smallworld_k =
 	
 	#Compute the matrix representation of the ranking
 	degree_dict = calc_degree_dict( G, g_n)
-	matrix_probs = np.zeros((g_n,g_n))
-	for row in range(0, g_n-1):
-		for col in range(row+1, g_n):
-			matrix_probs[row][col] = 1 if( degree_dict[row] > degree_dict[col]) else 0
-			matrix_probs[col][row] = 1 if( degree_dict[col] > degree_dict[row]) else 0
-	
+	Mprobs_index, Mprobs_values = build_Mprobs_from_dict( degree_dict, g_n )
+	Mprobs = [Mprobs_index, Mprobs_values, (g_n,g_n)]
+
 	
 	
 	# Build sparse matrices
 	# TODO: Get values from the edges
 	M_index, M_values = build_M_from_graph( G, key = "weight" )
 	M = [M_index,M_values,(g_n,g_n)]
-	Mprobs_index, Mprobs_values = build_Mprobs_from_graph( matrix_probs, g_n )
-	Mprobs = [Mprobs_index, Mprobs_values, (g_n,g_n)]
+	
 	#M = sparse_to_dense( M )
 	return M,Mprobs
 #end _create_graph
@@ -388,6 +383,12 @@ def create_batch(problems):
 	return Madj,Mprobs,nodesPerProblem #, targets_matrix
 #end create_batch
 
+def precisionAt10(labels, predicted):
+	precs = np.zeros(predicted.shape[0])
+	for i in range(0, predicted.shape[0]):
+		intersect = np.intersect1d( predicted[i], labels[i], assume_unique=True)
+		precs[i] = intersect.size / predicted[i].size
+	return np.mean( precs )
 
 #def create_batch(problems):
 #	n = np.zeros(len(problems))
@@ -410,7 +411,7 @@ if __name__ == '__main__':
 	epochs = 100
 	batch_n_max = 4096
 	batches_per_epoch = 32
-	n_size_min = 16
+	n_size_min = 20
 	n_size_max = 512
 	edge_probability = 0.25
 	time_steps = 32
@@ -438,6 +439,7 @@ if __name__ == '__main__':
 			epoch_loss = 0.0
 			epoch_degc = 0
 			epoch_degacc = 0
+			epoch_degprec10 = 0
 			epoch_n = 0
 			epoch_m = 0
 			for batch_i in range( batches_per_epoch ):
@@ -467,13 +469,9 @@ if __name__ == '__main__':
 				M, labels, nodesPerProblem = create_batch( batch )
 				n = M[2][0]
 				m = len( M[0] )
-				#M_sparse = sparse_to_dense(M)
-				#labels_sparse = sparse_to_dense(labels)
-#				print(M_sparse.shape)
-#				print(labels_sparse.shape)
-#				print(nodesPerProblem)
-				_, loss, degc, degacc = sess.run(
-					[ GNN["train_step"], GNN["loss"], GNN["prob_degree_predict_cost"],  GNN["prob_degree_predict_acc"] ],
+				
+				_, loss, degc, degacc, rank10_labels, rank10_predicted = sess.run(
+					[ GNN["train_step"], GNN["loss"], GNN["prob_degree_predict_cost"],  GNN["prob_degree_predict_acc"],  GNN["rank10_labels"], GNN["rank10_predicted"] ],
 					feed_dict = {
 						GNN["nodes_n"]: nodesPerProblem,
 						GNN["labels"]: sparse_to_dense(labels),
@@ -481,15 +479,17 @@ if __name__ == '__main__':
 						GNN["gnn"].matrix_placeholders["M"]: sparse_to_dense(M)
 					}
 				)
+				degprecision10 = precisionAt10( rank10_labels, rank10_predicted )
 				
 				epoch_loss += loss
 				epoch_degc += degc
 				epoch_degacc += degacc
+				epoch_degprec10 += degprecision10
 				epoch_n += n
 				epoch_m += m
 				
 				print(
-					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f}) Acc(D:{degree_acc:.5f})".format(
+					"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f}) Acc(D:{degree_acc:.5f}) PrecAt10(D:{degree_prec10:.5f})".format(
 						timestamp = timestamp(),
 						memory = memory_usage(),
 						epoch = epoch,
@@ -497,6 +497,7 @@ if __name__ == '__main__':
 						loss = loss,
 						degree_cost = degc,
 						degree_acc = degacc,
+						degree_prec10 = degprecision10,
 						n = n,
 						m = m,
 						i = instances
@@ -508,8 +509,9 @@ if __name__ == '__main__':
 			epoch_loss /= batches_per_epoch
 			epoch_degc /= batches_per_epoch
 			epoch_degacc /= batches_per_epoch
+			epoch_degprec10 /= batches_per_epoch
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f}) Error(D:{degree_acc:.5f}))".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m): ({n},{m})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f}) Acc(D:{degree_acc:.5f})  PrecAt10(D:{degree_prec10:.5f}))".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
@@ -517,6 +519,7 @@ if __name__ == '__main__':
 					loss = epoch_loss,
 					degree_cost = epoch_degc,
 					degree_acc = epoch_degacc,
+					degree_prec10 = epoch_degprec10,
 					n = epoch_n,
 					m = epoch_m,
 				),
@@ -545,8 +548,8 @@ if __name__ == '__main__':
 			test_n = M[2][0]
 			test_m = len( M[0] )
 			
-			test_loss, test_degc, test_degacc = sess.run(
-					[ GNN["loss"], GNN["prob_degree_predict_cost"], GNN["prob_degree_predict_acc"]],
+			test_loss, test_degc, test_degacc,  test_rank10_labels, test_rank10_predicted = sess.run(
+					[ GNN["loss"], GNN["prob_degree_predict_cost"], GNN["prob_degree_predict_acc"],  GNN["rank10_labels"], GNN["rank10_predicted"]],
 				feed_dict = {
 					GNN["gnn"].matrix_placeholders["M"]: sparse_to_dense( M ) ,
 					GNN["gnn"].time_steps: time_steps,
@@ -554,8 +557,9 @@ if __name__ == '__main__':
 					GNN["nodes_n"]: nodesPerProblem
 				}
 			)
+			test_degprecision10 = precisionAt10(test_rank10_labels, test_rank10_predicted)
 			print(
-				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f}) Error(D:{degree_acc:.5f}))".format(
+				"{timestamp}\t{memory}\tEpoch {epoch}\tBatch {batch} (n,m,i): ({n},{m},{i})\t| Loss(T:{loss:.5f},D:{degree_cost:.5f}) Acc(D:{degree_acc:.5f}) PrecAt10(D:{degree_prec10:.5f}))".format(
 					timestamp = timestamp(),
 					memory = memory_usage(),
 					epoch = epoch,
@@ -563,6 +567,7 @@ if __name__ == '__main__':
 					loss = test_loss,
 					degree_cost = test_degc,
 					degree_acc = test_degacc,
+					degree_prec10 = test_degprecision10, 
 					n = test_n,
 					m = test_m,
 					i = instances
