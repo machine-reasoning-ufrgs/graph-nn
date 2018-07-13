@@ -8,18 +8,24 @@ class GraphNN(object):
     mat,
     msg,
     loop,
-    params = {
-      'MLP_depth':              3,
-      'MLP_weight_initializer': tf.contrib.layers.xavier_initializer,
-      'MLP_bias_initializer':   tf.zeros_initializer,
-      'Cell_activation':        tf.nn.relu,
-      'Msg_activation':         tf.nn.relu,
-      'Msg_last_activation':    None,
-      'float_dtype':            tf.float32
-    },
+    MLP_depth = 3,
+    MLP_weight_initializer = tf.contrib.layers.xavier_initializer,
+    MLP_bias_initializer = tf.zeros_initializer,
+    Cell_activation = tf.nn.relu,
+    Msg_activation = tf.nn.relu,
+    Msg_last_activation = None,
+    float_dtype = tf.float32,
     name = 'GraphNN'
   ):
-    self.var, self.mat, self.msg, self.loop, self.name, self.params = var, mat, msg, loop, name, params
+    self.var, self.mat, self.msg, self.loop, self.name = var, mat, msg, loop, name
+
+    self.MLP_depth = MLP_depth
+    self.MLP_weight_initializer = MLP_weight_initializer
+    self.MLP_bias_initializer = MLP_bias_initializer
+    self.Cell_activation = Cell_activation
+    self.Msg_activation = Msg_activation
+    self.Msg_last_activation  = Msg_last_activation 
+    self.float_dtype = float_dtype
 
     # Check model for inconsistencies
     self.check_model()
@@ -78,9 +84,9 @@ class GraphNN(object):
     self.matrix_placeholders = {}
     for m in self.mat:
       if type(self.mat[m][1]) == int:
-        self.matrix_placeholders[m] = tf.placeholder(self.params['float_dtype'], shape=(None,self.mat[m][1]), name=m)
+        self.matrix_placeholders[m] = tf.placeholder(self.float_dtype, shape=(None,self.mat[m][1]), name=m)
       else:
-        self.matrix_placeholders[m] = tf.placeholder(self.params['float_dtype'], shape=(None,None), name=m)
+        self.matrix_placeholders[m] = tf.placeholder(self.float_dtype, shape=(None,None), name=m)
       #end
       self.time_steps = tf.placeholder(tf.int32, shape=(), name='time_steps')
     #end
@@ -88,11 +94,11 @@ class GraphNN(object):
 
   def _init_parameters(self):
     # Init embeddings
-    self._initial_embeddings = { v:tf.get_variable(initializer=tf.random_normal((1,d)), dtype=self.params['float_dtype'], name='{v}_init'.format(v=v)) for (v,d) in self.var.items() }
+    self._initial_embeddings = { v:tf.get_variable(initializer=tf.random_normal((1,d)), dtype=self.float_dtype, name='{v}_init'.format(v=v)) for (v,d) in self.var.items() }
     # Init LSTM cells
-    self._RNN_cells = { v:tf.contrib.rnn.LayerNormBasicLSTMCell(d, activation=self.params['Cell_activation']) for (v,d) in self.var.items() }
+    self._RNN_cells = { v:tf.contrib.rnn.LayerNormBasicLSTMCell(d, activation=self.Cell_activation) for (v,d) in self.var.items() }
     # Init message-computing MLPs
-    self._msg_MLPs = { msg:Mlp(layer_sizes=[self.var[vin]]*self.params['MLP_depth']+[self.var[vout]], activations=[self.params['Msg_activation']]*self.params['MLP_depth'] + [self.params['Msg_last_activation']], kernel_initializer=self.params['MLP_weight_initializer'](), bias_initializer=self.params['MLP_weight_initializer'](), name=msg, name_internal_layers=True) for msg, (vin,vout) in self.msg.items() }
+    self._msg_MLPs = { msg:Mlp(layer_sizes=[self.var[vin]]*self.MLP_depth+[self.var[vout]], activations=[self.Msg_activation]*self.MLP_depth + [self.Msg_last_activation], kernel_initializer=self.MLP_weight_initializer(), bias_initializer=self.MLP_weight_initializer(), name=msg, name_internal_layers=True) for msg, (vin,vout) in self.msg.items() }
   #end
 
   def _init_utilities(self):
@@ -110,9 +116,9 @@ class GraphNN(object):
   def _run(self):
     states = {}
     for v, init in self._initial_embeddings.items():
-      denom = tf.sqrt(tf.cast(self.var[v], tf.float32))
+      denom = tf.sqrt(tf.cast(self.var[v], self.float_dtype))
       h0 = tf.tile(tf.div(init,denom), (self.num_vars[v],1))
-      c0 = tf.zeros_like(h0, dtype=self.params['float_dtype'])
+      c0 = tf.zeros_like(h0, dtype=self.float_dtype)
       states[v] = tf.contrib.rnn.LSTMStateTuple(h=h0, c=c0)
     #end
 
