@@ -787,23 +787,8 @@ def main_v2():
     ensure_datasets(nmin,nmax,conn_min,conn_max,bins,batch_size,train_batches_per_epoch,test_batches_per_epoch)
 
     # Create train and test loaders
-    train_loader    = InstanceLoader("train", target_cost_dev=0)
-    test_loader     = InstanceLoader("test", target_cost_dev=0)
-
-    print('Computing mean and standard deviation for the normalized route cost of training and test instances ...', flush=True)
-    train_route_costs   = [ sum([ Mw[min(i,j),max(i,j)] for (i,j) in zip(route,route[1:]+route[:1]) ]) / Ma.shape[0] for (Ma,Mw,route) in train_loader.get_instances(train_batches_per_epoch*batch_size) ]
-    test_route_costs    = [ sum([ Mw[min(i,j),max(i,j)] for (i,j) in zip(route,route[1:]+route[:1]) ]) / Ma.shape[0] for (Ma,Mw,route) in test_loader.get_instances(test_batches_per_epoch*batch_size) ]
-
-    # Reset train and test loaders
-    train_loader.reset()
-    test_loader.reset()
-
-    print('(Mean,Std.Dev) Normalized train route cost: ({mean:.3f},{dev:.3f})'.format(mean=np.mean(train_route_costs),dev=np.std(train_route_costs)), flush=True)
-    print('(Mean,Std.Dev) Normalized test route cost: ({mean:.3f},{dev:.3f})'.format(mean=np.mean(test_route_costs),dev=np.std(test_route_costs)), flush=True)
-
-    # Update target cost deviation for train and test loaders
-    train_loader.target_cost_dev    = 0.1*np.std(train_route_costs)
-    test_loader.target_cost_dev     = 0.1*np.std(test_route_costs)
+    train_loader    = InstanceLoader("train", target_cost_dev=target_cost_dev)
+    test_loader     = InstanceLoader("test", target_cost_dev=target_cost_dev)
 
     # Build model
     print("Building model ...", flush=True)
@@ -852,7 +837,8 @@ def main_v2():
                 # Save weights
                 if save_checkpoints: save_weights(sess,'./TSP-checkpoints-decision');
 
-                logfile.write('{trloss} {tracc} {trsat} {trpred} {tstloss} {tstacc} {tstsat} {tstpred}\n'.format(
+                logfile.write('{epoch_i} {trloss} {tracc} {trsat} {trpred} {tstloss} {tstacc} {tstsat} {tstpred}\n'.format(
+                    epoch_i = epoch_i,
                     trloss = np.mean(train_loss),
                     tracc = np.mean(train_acc),
                     trsat = np.mean(train_sat),

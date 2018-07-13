@@ -74,20 +74,16 @@ class InstanceLoader(object):
             cost = sum([ Mw[x,y] for (x,y) in route_edges ]) / n
 
             # Choose a target cost and fill CV and CE with it
-            if target_cost is not None:
-                delta = target_cost - cost
-
+            if target_cost is None:
+                delta = np.random.uniform(0,target_cost_dev*cost)
+                CV[n_acc:n_acc+n,0] = cost + delta if i%2==0 else cost - delta
+                CE[m_acc:m_acc+m,0] = cost + delta if i%2==0 else cost - delta
+                route_exists[i] = 1 if i%2==0 else 0
+            else:
                 CV[n_acc:n_acc+n,0] = target_cost
                 CE[m_acc:m_acc+m,0] = target_cost
-            else:
-                delta = abs(np.random.normal(0, target_cost_dev))
-                delta *= (+1) if i%2 == 0 else (-1)
-
-                CV[n_acc:n_acc+n,0] = cost + delta 
-                CE[m_acc:m_acc+m,0] = cost + delta
+                route_exists[i] = 1 if target_cost > cost else 0
             #end
-
-            route_exists[i] = 1 if delta >= 0 else 0
 
             # Populate M, W and edges_mask
             for e,(x,y) in enumerate(edges):
