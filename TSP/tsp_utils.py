@@ -50,10 +50,11 @@ class InstanceLoader(object):
 
         # Compute matrices M, W, CV, CE
         # and vectors edges_mask and route_exists
-        M               = np.zeros((total_edges,total_vertices))
+        EV              = np.zeros((total_edges,total_vertices))
         W               = np.zeros((total_edges,1))
-        CV              = np.zeros((total_vertices,1))
-        CE              = np.zeros((total_edges,1))
+        VR              = np.zeros((total_vertices,n_instances))
+        ER              = np.zeros((total_edges,n_instances))
+        C               = np.zeros((n_instances,1))
         edges_mask      = np.zeros(total_edges)
         route_exists    = np.zeros(n_instances)
         for (i,(Ma,Mw,route)) in enumerate(instances):
@@ -70,33 +71,41 @@ class InstanceLoader(object):
             # Get the list of edges in the optimal TSP route for this graph
             route_edges = [ (min(x,y),max(x,y)) for (x,y) in zip(route,route[1:]+route[0:1]) ]
 
-            # Compute the optimal (normalizes) TSP cost for this graph
+            # Compute the optimal (normalized) TSP cost for this graph
             cost = sum([ Mw[x,y] for (x,y) in route_edges ]) / n
 
             # Choose a target cost and fill CV and CE with it
             if target_cost is None:
-                delta = np.random.uniform(0,target_cost_dev*cost)
-                CV[n_acc:n_acc+n,0] = cost + delta if i%2==0 else cost - delta
-                CE[m_acc:m_acc+m,0] = cost + delta if i%2==0 else cost - delta
+                #delta = np.random.uniform(0,target_cost_dev*cost)
+                delta = target_cost_dev*cost
+                #CV[n_acc:n_acc+n,0] = cost + delta if i%2==0 else cost - delta
+                #CE[m_acc:m_acc+m,0] = cost + delta if i%2==0 else cost - delta
+                C[i,0] = cost + delta if i%2==0 else cost - delta
                 route_exists[i] = 1 if i%2==0 else 0
             else:
-                CV[n_acc:n_acc+n,0] = target_cost
-                CE[m_acc:m_acc+m,0] = target_cost
-                route_exists[i] = 1 if target_cost > cost else 0
+                #CV[n_acc:n_acc+n,0] = target_cost
+                #CE[m_acc:m_acc+m,0] = target_cost
+                C[i,0] = target_cost
+                route_exists[i] = 1 if target_cost >= cost else 0
             #end
 
-            # Populate M, W and edges_mask
+            # Populate EV, W and edges_mask
             for e,(x,y) in enumerate(edges):
-                M[m_acc+e,n_acc+x] = 1
-                M[m_acc+e,n_acc+y] = 1
+                EV[m_acc+e,n_acc+x] = 1
+                EV[m_acc+e,n_acc+y] = 1
                 W[m_acc+e] = Mw[x,y]
                 if (x,y) in route_edges:
                     edges_mask[m_acc+e] = 1
                 #end
             #end
+
+            # Populate VR and ER
+            VR[n_acc:n_acc+n, i] = 1
+            ER[m_acc:m_acc+m, i] = 1
+
         #end
 
-        return M, W, CV, CE, edges_mask, route_exists, n_vertices, n_edges
+        return EV, VR, ER, W, C, edges_mask, route_exists, n_vertices, n_edges
     #end
 
     def get_batches(self, batch_size):

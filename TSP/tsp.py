@@ -368,22 +368,22 @@ def main():
                         batch_size = batch_size
                         )
                     )
-                    print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
+                    print('Cost (Loss,Deviation):\t\t\t\t({loss:.4f},{dev:.4f})'.format(
                         loss = train_stats['cost_loss'][batch_i],
                         dev = train_stats['deviation'][batch_i]
                         )
                     )
-                    print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
+                    print('Edges Loss:\t\t\t\t\t{loss:.4f}'.format(
                         loss = train_stats['edges_loss'][batch_i]
                         )
                     )
-                    print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                    print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.4f},{vis:.4f},{conn:.4f})'.format(
                         deg = train_stats['degree_acc'][batch_i],
                         vis = train_stats['visited_acc'][batch_i],
                         conn = train_stats['conn_comp_acc'][batch_i],
                         )
                     )
-                    print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                    print('Precision,Recall,True Neg. Rate:\t\t{prec:.4f},{rec:.4f},{tneg:.4f}'.format(
                         prec = train_stats['precision'][batch_i],
                         rec = train_stats['recall'][batch_i],
                         tneg = train_stats['true_neg'][batch_i],
@@ -397,22 +397,22 @@ def main():
                     epoch = epoch
                     )
                 )
-                print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
+                print('Cost (Loss,Deviation):\t\t\t\t({loss:.4f},{dev:.4f})'.format(
                     loss = np.mean(train_stats['cost_loss']),
                     dev = np.mean(train_stats['deviation'])
                     )
                 )
-                print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
+                print('Edges Loss:\t\t\t\t\t{loss:.4f}'.format(
                     loss = np.mean(train_stats['edges_loss'])
                     )
                 )
-                print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.4f},{vis:.4f},{conn:.4f})'.format(
                     deg = np.mean(train_stats['degree_acc']),
                     vis = np.mean(train_stats['visited_acc']),
                     conn = np.mean(train_stats['conn_comp_acc'])
                     )
                 )
-                print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                print('Precision,Recall,True Neg. Rate:\t\t{prec:.4f},{rec:.4f},{tneg:.4f}'.format(
                     prec = np.mean(train_stats['precision']),
                     rec = np.mean(train_stats['recall']),
                     tneg = np.mean(train_stats['true_neg'])
@@ -453,22 +453,22 @@ def main():
                         batch_size = batch_size
                         )
                     )
-                    print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
+                    print('Cost (Loss,Deviation):\t\t\t\t({loss:.4f},{dev:.4f})'.format(
                         loss = test_stats['cost_loss'][batch_i],
                         dev = test_stats['deviation'][batch_i]
                         )
                     )
-                    print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
+                    print('Edges Loss:\t\t\t\t\t{loss:.4f}'.format(
                         loss = test_stats['edges_loss'][batch_i]
                         )
                     )
-                    print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                    print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.4f},{vis:.4f},{conn:.4f})'.format(
                         deg = test_stats['degree_acc'][batch_i],
                         vis = test_stats['visited_acc'][batch_i],
                         conn = test_stats['conn_comp_acc'][batch_i],
                         )
                     )
-                    print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                    print('Precision,Recall,True Neg. Rate:\t\t{prec:.4f},{rec:.4f},{tneg:.4f}'.format(
                         prec = test_stats['precision'][batch_i],
                         rec = test_stats['recall'][batch_i],
                         tneg = test_stats['true_neg'][batch_i],
@@ -482,22 +482,22 @@ def main():
                     epoch = epoch
                     )
                 )
-                print('Cost (Loss,Deviation):\t\t\t\t({loss:.3f},{dev:.3f})'.format(
+                print('Cost (Loss,Deviation):\t\t\t\t({loss:.4f},{dev:.4f})'.format(
                     loss = test_stats['cost_loss'][batch_i],
                     dev = test_stats['deviation'][batch_i]
                     )
                 )
-                print('Edges Loss:\t\t\t\t\t{loss:.3f}'.format(
+                print('Edges Loss:\t\t\t\t\t{loss:.4f}'.format(
                     loss = test_stats['edges_loss'][batch_i]
                     )
                 )
-                print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.3f},{vis:.3f},{conn:.3f})'.format(
+                print('(Degree,Visited,Conn.Comp.) Acc:\t\t({deg:.4f},{vis:.4f},{conn:.4f})'.format(
                     deg = np.mean(test_stats['degree_acc']),
                     vis = np.mean(test_stats['visited_acc']),
                     conn = np.mean(test_stats['conn_comp_acc'])
                     )
                 )
-                print('Precision,Recall,True Neg. Rate:\t\t{prec:.3f},{rec:.3f},{tneg:.3f}'.format(
+                print('Precision,Recall,True Neg. Rate:\t\t{prec:.4f},{rec:.4f},{tneg:.4f}'.format(
                     prec = np.mean(test_stats['precision']),
                     rec = np.mean(test_stats['recall']),
                     tneg = np.mean(test_stats['true_neg'])
@@ -563,52 +563,83 @@ def build_network_v2(d):
             # V is the set of vertex embeddings
             'V': d,
             # E is the set of edge embeddings
-            'E': d
+            'E': d,
+            # G is the set of graph embeddings (just one)
+            'R': d
         },
         {
             # M is a E×V adjacency matrix connecting each edge to the vertices it is connected to
-            'M': ('E','V'),
+            'EV': ('E','V'),
             # W is a column matrix of shape |E|×1 where W[i,1] is the weight of the i-th edge
             'W': ('E',1),
-            # CV and CE are column matrices of shapes |V|×1 and |E|×1
-            # respectively whose function is to send to each vertex and each
-            # edge embedding in the i-th problem the same target route cost
-            # c_i (remember: we want to decide whether there is a route with
-            # cost ⩽ c)
-            'CV': ('V',1),
-            'CE': ('E',1)
+            # VR is an (fully-connected) adjacency matrix connecting each vertex to its corresponding route embedding
+            'VR': ('V','R'),
+            # ER is an (fully-connected) adjacency matrix connecting each edge to its corresponding route embedding
+            'ER': ('E','R'),
+            # C is a column matrix assigned with sending to each route embedding its corresponding target cost
+            'C': ('R',1)
         },
         {
-            # Vmsg is a MLP which computes messages from vertex embeddings to edge embeddings
-            'Vmsg': ('V','E'),
-            # Emsg is a MLP which computes messages from edge embeddings to vertex embeddings
-            'Emsg': ('E','V')
+            # V_msg_E is a MLP which computes messages from vertex embeddings to edge embeddings
+            'V_msg_E': ('V','E'),
+            # E_msg_V is a MLP which computes messages from edge embeddings to vertex embeddings
+            'E_msg_V': ('E','V'),
+            # V_msg_R is a MLP which computes messages from edge embeddings to route embeddings
+            'V_msg_R': ('V','R'),
+            # R_msg_V is a MLP which computes messages from route embeddings to edge embeddings
+            'R_msg_V': ('R','V'),
+            # E_msg_R is a MLP which computes messages from edge embeddings to route embeddings
+            'E_msg_R': ('E','R'),
+            # R_msg_E is a MLP which computes messages from route embeddings to edge embeddings
+            'R_msg_E': ('R','E')
         },
         {
-            # V(t+1) ← Vu( Mᵀ × Emsg(E(t)), CV )
+            # V(t+1) ← Vu( EVᵀ × E_msg_V(E(t)), VR × R_msg_V(R(t)) )
             'V': [
                 {
-                    'mat': 'M',
-                    'msg': 'Emsg',
+                    'mat': 'EV',
+                    'msg': 'E_msg_V',
                     'transpose?': True,
                     'var': 'E'
                 },
                 {
-                    'mat': 'CV'
+                    'mat': 'VR',
+                    'msg': 'R_msg_V',
+                    'var': 'R'
                 }
             ],
-            # E(t+1) ← Eu( M × Vmsg(V(t)), W, CE )
+            # E(t+1) ← Eu( EV × V_msg_E(V(t)), ER × R_msg_E(R(t)), W )
             'E': [
                 {
-                    'mat': 'M',
-                    'msg': 'Vmsg',
+                    'mat': 'EV',
+                    'msg': 'V_msg_E',
                     'var': 'V'
+                },
+                {
+                    'mat': 'ER',
+                    'msg': 'R_msg_E',
+                    'var': 'R'
                 },
                 {
                     'mat': 'W'
                 },
+            ],
+            # R(t+1) ← Ru( VRᵀ × V_msg_R(V(t)), ERᵀ × E_msg_R(E(t)), C )
+            'R': [
                 {
-                    'mat': 'CE'
+                    'mat': 'VR',
+                    'msg': 'V_msg_R',
+                    'transpose?': True,
+                    'var': 'V'
+                },
+                {
+                    'mat': 'ER',
+                    'msg': 'E_msg_R',
+                    'transpose?': True,
+                    'var': 'E'
+                },
+                {
+                    'mat': 'C'
                 }
             ]
         },
@@ -680,26 +711,19 @@ def build_network_v2(d):
 #end
 
 def run_batch_v2(sess, model, batch, batch_i, epoch_i, time_steps, train=False, verbose=True):
-    
-    """
-        Obtain:
-            M: an adjacency matrix ∈ {0,1}^(|E|×|V|) between edges and vertices
-            W: a column matrix ∈ ℜ^(|E|×1) with the weight of each edge
-            edges_mask: a binary mask ∈ {0,1}^|E| marking edges in the solution with 1s and 0s otherwise
-            n_vertices: a vector with the number of vertices for each problem in the batch
-            n_edges: a vector with the number of edges for each problem in the batch
-    """
-    M, W, CV, CE, edges_mask, route_exists, n_vertices, n_edges = batch
+
+    EV, VR, ER, W, C, edges_mask, route_exists, n_vertices, n_edges = batch
 
     # Compute the number of problems
     n_problems = n_vertices.shape[0]
 
     # Define feed dict
     feed_dict = {
-        model['gnn'].matrix_placeholders['M']: M,
+        model['gnn'].matrix_placeholders['EV']: EV,
+        model['gnn'].matrix_placeholders['VR']: VR,
+        model['gnn'].matrix_placeholders['ER']: ER,
+        model['gnn'].matrix_placeholders['C']: C,
         model['gnn'].matrix_placeholders['W']: W,
-        model['gnn'].matrix_placeholders['CV']: CV,
-        model['gnn'].matrix_placeholders['CE']: CE,
         model['gnn'].time_steps: time_steps,
         model['route_exists']: route_exists,
         model['n_vertices']: n_vertices,
@@ -717,7 +741,7 @@ def run_batch_v2(sess, model, batch, batch_i, epoch_i, time_steps, train=False, 
 
     if verbose:
         # Print stats
-        print('{train_or_test} Epoch {epoch_i} Batch {batch_i}\t|\t(n,m,batch size)=({n},{m},{batch_size})\t|\t(Loss,Acc)=({loss:.3f},{acc:.3f})\t|\tAvg. (Sat,Prediction)=({avg_sat:.3f},{avg_pred:.3f})'.format(
+        print('{train_or_test} Epoch {epoch_i} Batch {batch_i}\t|\t(n,m,batch size)=({n},{m},{batch_size})\t|\t(Loss,Acc)=({loss:.4f},{acc:.4f})\t|\tAvg. (Sat,Prediction)=({avg_sat:.4f},{avg_pred:.4f})'.format(
             train_or_test = 'Train' if train else 'Test',
             epoch_i = epoch_i,
             batch_i = batch_i,
@@ -737,7 +761,7 @@ def run_batch_v2(sess, model, batch, batch_i, epoch_i, time_steps, train=False, 
 #end
 
 def summarize_epoch(epoch_i, loss, acc, sat, pred, train=False):
-    print('{train_or_test} Epoch {epoch_i} Average\t|\t(Loss,Acc)=({loss:.3f},{acc:.3f})\t|\tAvg. (Sat,Pred)=({avg_sat:.3f},{avg_pred:.3f})'.format(
+    print('{train_or_test} Epoch {epoch_i} Average\t|\t(Loss,Acc)=({loss:.4f},{acc:.4f})\t|\tAvg. (Sat,Pred)=({avg_sat:.4f},{avg_pred:.4f})'.format(
         train_or_test = 'Train' if train else 'Test',
         epoch_i = epoch_i,
         loss = np.mean(loss),
@@ -769,7 +793,7 @@ def main_v2():
 
     d                       = 128
     time_steps              = 25
-    target_cost_dev         = 0.01
+    target_cost_dev         = 0.1
 
     epochs_n                = 100
     batch_size              = 16
@@ -814,13 +838,13 @@ def main_v2():
 
                 train_loss  = np.zeros(train_batches_per_epoch)
                 train_acc   = np.zeros(train_batches_per_epoch)
-                train_sat  = np.zeros(train_batches_per_epoch)
-                train_pred = np.zeros(train_batches_per_epoch)
+                train_sat   = np.zeros(train_batches_per_epoch)
+                train_pred  = np.zeros(train_batches_per_epoch)
 
                 test_loss   = np.zeros(test_batches_per_epoch)
                 test_acc    = np.zeros(test_batches_per_epoch)
-                test_sat   = np.zeros(test_batches_per_epoch)
-                test_pred  = np.zeros(test_batches_per_epoch)
+                test_sat    = np.zeros(test_batches_per_epoch)
+                test_pred   = np.zeros(test_batches_per_epoch)
 
                 print("Training model...", flush=True)
                 for (batch_i, batch) in islice(enumerate(train_loader.get_batches(batch_size)), train_batches_per_epoch):
