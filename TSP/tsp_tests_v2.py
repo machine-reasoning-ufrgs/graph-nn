@@ -8,12 +8,15 @@ import numpy as np
 from numpy import linalg as LA
 from matplotlib import pyplot as plt
 from graphnn_refactored import GraphNN
-from tsp import build_network_v2
+from tsp import build_network_v2, ensure_datasets, run_batch_v2, summarize_epoch
 from tsp_utils import InstanceLoader, create_graph_metric
 from util import load_weights
 from sklearn.cluster import KMeans
+from matplotlib import colors as mcolors
+from matplotlib import cm
+from itertools import islice
 
-def extract_solution(sess, model, instance, time_steps=25):
+def extract_solution(sess, model, instance, time_steps=50):
 
     # Extract list of edges from instance
     Ma,Mw,route,nodes = instance
@@ -51,7 +54,7 @@ def extract_solution(sess, model, instance, time_steps=25):
     #end
 
     # Get the indices n positive embeddings closest to their center
-    top_n = sorted(pos_indices, key=lambda i: LA.norm(edge_embeddings[i,:]-pos_center) )[:n]
+    top_n = sorted(pos_indices, key=lambda i: LA.norm(edge_embeddings[i,:]-pos_center) )#[:n]
 
     print('')
     print('Is there a route with cost < {target_cost:.3f}? R: {R}'.format(target_cost=target_cost, R='Yes' if route_exists[0]==1 else 'No'))
@@ -61,11 +64,9 @@ def extract_solution(sess, model, instance, time_steps=25):
     predicted_edges = [ (i,j) for e,(i,j) in enumerate(edges) if e in top_n ]
 
     return predicted_edges
-
 #end
 
-if __name__ == '__main__':
-
+def draw_routes():
     d = 128
     n = 20
     bins = 10**6
@@ -86,25 +87,87 @@ if __name__ == '__main__':
         # Restore saved weights
         load_weights(sess,'./TSP-checkpoints-decision')
 
-        instance = create_graph_metric(n,bins,connectivity)
-        Ma,_,_,nodes = instance
-        edges = list(zip(np.nonzero(Ma)[0],np.nonzero(Ma)[1]))
+        k = 3
 
-        predicted_edges = extract_solution(sess,model,instance)
+        # Normalize item number values to colormap
+        norm = mcolors.Normalize(vmin=0, vmax=k**2)
 
-        for (i,j) in edges:
-            x0,y0 = nodes[i]
-            x1,y1 = nodes[j]
-            if (i,j) in predicted_edges:
-                plt.plot([x0,x1],[y0,y1], 'b-', linewidth=1, zorder=2)
-            else:
-                dummy = 0
-                #plt.plot([x0,x1],[y0,y1], 'r--', linewidth=0.5, zorder=1)
+        for inst in range(k**2):
+
+            instance = create_graph_metric(n,bins,connectivity)
+            Ma,_,_,nodes = instance
+            edges = list(zip(np.nonzero(Ma)[0],np.nonzero(Ma)[1]))
+
+            predicted_edges = extract_solution(sess,model,instance)
+
+            nodes_ = nodes + np.array([inst//k,inst%k])
+
+            for (i,j) in edges:
+                x0,y0 = nodes_[i]
+                x1,y1 = nodes_[j]
+                if (i,j) in predicted_edges:
+                    plt.plot([x0,x1],[y0,y1], color = cm.jet(norm(inst)), linewidth=1, zorder=2)
+                else:
+                    dummy = 0
+                    #plt.plot([x0,x1],[y0,y1], 'r--', linewidth=0.5, zorder=1)
+                #end
             #end
-        #end
 
-        plt.scatter(x=nodes[:,0], y=nodes[:,1], zorder=3)
+            plt.scatter(x=nodes_[:,0], y=nodes_[:,1], edgecolors='black', c='w', zorder=3)
+        #end
 
         plt.show()
     #end
+#end
+
+def test(time_steps=25):
+
+    d                       = 128
+
+    epochs_n                = 100
+    batch_size              = 1
+    test_batches_per_epoch  = 16*32
+
+    # Create train and test loaders
+    train_loader    = InstanceLoader("train", target_cost_dev=0.25*0.04)
+    test_loader     = InstanceLoader("test", target_cost_dev=0.25*0.04)
+
+    # Build model
+    print("Building model ...", flush=True)
+    GNN = build_network_v2(d)
+
+    # Disallow GPU use
+    config = tf.ConfigProto( device_count = {"GPU":0})
+    with tf.Session(config=config) as sess:
+
+        # Initialize global variables
+        print("Initializing global variables ... ", flush=True)
+        sess.run( tf.global_variables_initializer() )
+
+        # Restore saved weights
+        load_weights(sess,'./TSP-checkpoints-decision')
+        
+        with open('TSP-log.dat','w') as logfile:
+            # Run for a number of epochs
+            for epoch_i in range(1):
+
+                test_loader.reset()
+
+                test_loss   = np.zeros(test_batches_per_epoch)
+                test_acc    = np.zeros(test_batches_per_epoch)
+                test_sat    = np.zeros(test_batches_per_epoch)
+                test_pred   = np.zeros(test_batches_per_epoch)
+
+                print("Testing model...", flush=True)
+                for (batch_i, batch) in islice(enumerate(test_loader.get_batches(batch_size)), test_batches_per_epoch):
+                    test_loss[batch_i], test_acc[batch_i], test_sat[batch_i], test_pred[batch_i] = run_batch_v2(sess, GNN, batch, batch_i, epoch_i, time_steps, train=False, verbose=True)
+                #end
+                summarize_epoch(epoch_i,test_loss,test_acc,test_sat,test_pred,train=False)
+            #end
+        #end
+    #end
+#end
+
+if __name__ == '__main__':
+    test(time_steps=sys.argv[1])
 #end
