@@ -8,7 +8,7 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from graphnn_refactored import GraphNN
 from mlp import Mlp
 # Import tools
-#import itertools
+import itertools
 from util import timestamp, memory_usage, sparse_to_dense, save_weights#, percent_error
 from instance_loader import InstanceLoader
 
