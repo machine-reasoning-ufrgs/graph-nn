@@ -565,15 +565,13 @@ def build_network_v2(d):
             # E is the set of edge embeddings
             'E': d,
             # G is the set of graph embeddings (just one)
-            'R': d
+            'R': 4*d
         },
         {
             # M is a E×V adjacency matrix connecting each edge to the vertices it is connected to
             'EV': ('E','V'),
             # W is a column matrix of shape |E|×1 where W[i,1] is the weight of the i-th edge
             'W': ('E',1),
-            # VR is an (fully-connected) adjacency matrix connecting each vertex to its corresponding route embedding
-            'VR': ('V','R'),
             # ER is an (fully-connected) adjacency matrix connecting each edge to its corresponding route embedding
             'ER': ('E','R'),
             # C is a column matrix assigned with sending to each route embedding its corresponding target cost
@@ -585,27 +583,19 @@ def build_network_v2(d):
             # E_msg_V is a MLP which computes messages from edge embeddings to vertex embeddings
             'E_msg_V': ('E','V'),
             # V_msg_R is a MLP which computes messages from edge embeddings to route embeddings
-            'V_msg_R': ('V','R'),
-            # R_msg_V is a MLP which computes messages from route embeddings to edge embeddings
-            'R_msg_V': ('R','V'),
             # E_msg_R is a MLP which computes messages from edge embeddings to route embeddings
             'E_msg_R': ('E','R'),
             # R_msg_E is a MLP which computes messages from route embeddings to edge embeddings
             'R_msg_E': ('R','E')
         },
         {
-            # V(t+1) ← Vu( EVᵀ × E_msg_V(E(t)), VR × R_msg_V(R(t)) )
+            # V(t+1) ← Vu( EVᵀ × E_msg_V(E(t)) )
             'V': [
                 {
                     'mat': 'EV',
                     'msg': 'E_msg_V',
                     'transpose?': True,
                     'var': 'E'
-                },
-                {
-                    'mat': 'VR',
-                    'msg': 'R_msg_V',
-                    'var': 'R'
                 }
             ],
             # E(t+1) ← Eu( EV × V_msg_E(V(t)), ER × R_msg_E(R(t)), W )
@@ -624,14 +614,8 @@ def build_network_v2(d):
                     'mat': 'W'
                 },
             ],
-            # R(t+1) ← Ru( VRᵀ × V_msg_R(V(t)), ERᵀ × E_msg_R(E(t)), C )
+            # R(t+1) ← Ru( ERᵀ × E_msg_R(E(t)), C )
             'R': [
-                {
-                    'mat': 'VR',
-                    'msg': 'V_msg_R',
-                    'transpose?': True,
-                    'var': 'V'
-                },
                 {
                     'mat': 'ER',
                     'msg': 'E_msg_R',
@@ -712,7 +696,7 @@ def build_network_v2(d):
 
 def run_batch_v2(sess, model, batch, batch_i, epoch_i, time_steps, train=False, verbose=True):
 
-    EV, VR, ER, W, C, edges_mask, route_exists, n_vertices, n_edges = batch
+    EV, ER, W, C, edges_mask, route_exists, n_vertices, n_edges = batch
 
     # Compute the number of problems
     n_problems = n_vertices.shape[0]
@@ -720,7 +704,6 @@ def run_batch_v2(sess, model, batch, batch_i, epoch_i, time_steps, train=False, 
     # Define feed dict
     feed_dict = {
         model['gnn'].matrix_placeholders['EV']: EV,
-        model['gnn'].matrix_placeholders['VR']: VR,
         model['gnn'].matrix_placeholders['ER']: ER,
         model['gnn'].matrix_placeholders['C']: C,
         model['gnn'].matrix_placeholders['W']: W,
