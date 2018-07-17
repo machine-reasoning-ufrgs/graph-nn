@@ -362,7 +362,7 @@ if __name__ == '__main__':
 			epoch_acc = 0.0
 			epoch_n = 0
 			epoch_m = 0
-			for cbat, batch in enumerate(instance_loader.get_batches(32)):
+			for cbat, batch in itertools.islice( enumerate(instance_loader.get_batches(32)), batches_per_epoch ):
 				
 				M = batch["matrix"]
 				n = M[2][0]
@@ -417,8 +417,6 @@ if __name__ == '__main__':
 					),
 					flush = True
 				)
-				if(cbat == 31):
-					break
 			#end for
 			# Summarize Epoch
 			epoch_loss /= batches_per_epoch
