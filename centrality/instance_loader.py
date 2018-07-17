@@ -54,6 +54,10 @@ class InstanceLoader(object):
     #end
   #end
 
+  def get_batch(self, batch_size):
+    return create_batch(self.get_instances(batch_size))
+  #end
+
   def reset(self):
     random.shuffle( self.filenames )
     self.index = 0
@@ -186,7 +190,7 @@ def create_batch(problems):
 if __name__ == '__main__':
   instance_loader = InstanceLoader("./instances")
   np.set_printoptions(threshold=np.nan,linewidth=np.nan)
-  for b, batch in enumerate( instance_loader.get_batches(32) ):
-    print( b, batch["problem_n"], batch["degree"], np.sum( sparse_to_dense( batch["matrix"] ), axis = 1 ), np.sum( sparse_to_dense( batch["degree_compare"] ), axis = 1 ) )
+  for b, batch in enumerate( instance_loader.get_batches(4) ):
+    print( b, batch["problem_n"]) #, batch["degree"], np.sum( sparse_to_dense( batch["matrix"] ), axis = 1 ), np.sum( sparse_to_dense( batch["degree_compare"] ), axis = 1 ) )
   #end
 #end
