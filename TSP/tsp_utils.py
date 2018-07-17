@@ -22,6 +22,7 @@ class InstanceLoader(object):
     def __init__(self,path,target_cost_dev):
         self.path = path
         self.filenames = [ path + '/' + x for x in os.listdir(path) ]
+        self.filenames = sorted(self.filenames, key=lambda x: int(x.split('/')[1].split('.')[0]))
         self.target_cost_dev = target_cost_dev
         self.reset()
     #end
@@ -51,9 +52,8 @@ class InstanceLoader(object):
         # Compute matrices M, W, CV, CE
         # and vectors edges_mask and route_exists
         EV              = np.zeros((total_edges,total_vertices))
-        W               = np.zeros((total_edges,1))
-        VR              = np.zeros((total_vertices,n_instances))
         ER              = np.zeros((total_edges,n_instances))
+        W               = np.zeros((total_edges,1))
         C               = np.zeros((n_instances,1))
         edges_mask      = np.zeros(total_edges)
         route_exists    = np.zeros(n_instances)
@@ -99,13 +99,11 @@ class InstanceLoader(object):
                 #end
             #end
 
-            # Populate VR and ER
-            VR[n_acc:n_acc+n, i] = 1
+            # Populate and ER
             ER[m_acc:m_acc+m, i] = 1
-
         #end
 
-        return EV, VR, ER, W, C, edges_mask, route_exists, n_vertices, n_edges
+        return EV, ER, W, C, edges_mask, route_exists, n_vertices, n_edges
     #end
 
     def get_batches(self, batch_size):
@@ -117,7 +115,6 @@ class InstanceLoader(object):
     #end
 
     def reset(self):
-        random.shuffle( self.filenames )
         self.index = 0
     #end
 #end
@@ -307,3 +304,6 @@ def create_dataset_metric(nmin, nmax, conn_min, conn_max, path, bins=10**6, conn
     # Return mean and standard deviation for the set of (normalized) route costs
     return np.mean(route_cost), np.std(route_cost)
 #end
+
+if __name__ == '__main__':
+    loader = InstanceLoader('train',0)
