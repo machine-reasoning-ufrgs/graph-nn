@@ -8,7 +8,7 @@ sys.path.insert(1, os.path.join(sys.path[0], '..'))
 from graphnn_refactored import GraphNN
 from mlp import Mlp
 # Import tools
-#import itertools
+import itertools
 from util import timestamp, memory_usage, sparse_to_dense, save_weights#, percent_error
 from instance_loader import InstanceLoader
 
@@ -362,7 +362,7 @@ if __name__ == '__main__':
 			epoch_acc = 0.0
 			epoch_n = 0
 			epoch_m = 0
-			for cbat, batch in enumerate(instance_loader.get_batches(32)):
+			for cbat, batch in itertools.islice( enumerate(instance_loader.get_batches(32)), batches_per_epoch ):
 				
 				M = batch["matrix"]
 				n = M[2][0]
@@ -417,8 +417,6 @@ if __name__ == '__main__':
 					),
 					flush = True
 				)
-				if(cbat == 31):
-					break
 			#end for
 			# Summarize Epoch
 			epoch_loss /= batches_per_epoch
