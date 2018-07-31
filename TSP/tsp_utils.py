@@ -19,11 +19,10 @@ STDERR = 2
 
 class InstanceLoader(object):
 
-    def __init__(self,path,target_cost_dev):
+    def __init__(self,path):
         self.path = path
         self.filenames = [ path + '/' + x for x in os.listdir(path) ]
-        self.filenames = sorted(self.filenames, key=lambda x: int(x.split('/')[1].split('.')[0]))
-        self.target_cost_dev = target_cost_dev
+        random.shuffle(self.filenames)
         self.reset()
     #end
 
@@ -52,9 +51,8 @@ class InstanceLoader(object):
         # Compute matrices M, W, CV, CE
         # and vectors edges_mask and route_exists
         EV              = np.zeros((total_edges,total_vertices))
-        ER              = np.zeros((total_edges,n_instances))
         W               = np.zeros((total_edges,1))
-        C               = np.zeros((n_instances,1))
+        C               = np.zeros((total_edges,1))
         edges_mask      = np.zeros(total_edges)
         route_exists    = np.zeros(n_instances)
         for (i,(Ma,Mw,route)) in enumerate(instances):
@@ -69,23 +67,18 @@ class InstanceLoader(object):
             edges = list(zip(np.nonzero(Ma)[0], np.nonzero(Ma)[1]))
 
             # Get the list of edges in the optimal TSP route for this graph
-            route_edges = [ (min(x,y),max(x,y)) for (x,y) in zip(route,route[1:]+route[0:1]) ]
+            route_edges = [ (min(x,y),max(x,y)) for (x,y) in zip(route,route[1:]+route[:1]) ]
 
             # Compute the optimal (normalized) TSP cost for this graph
             cost = sum([ Mw[x,y] for (x,y) in route_edges ]) / n
 
             # Choose a target cost and fill CV and CE with it
             if target_cost is None:
-                #delta = np.random.uniform(0,target_cost_dev*cost)
                 delta = target_cost_dev*cost
-                #CV[n_acc:n_acc+n,0] = cost + delta if i%2==0 else cost - delta
-                #CE[m_acc:m_acc+m,0] = cost + delta if i%2==0 else cost - delta
-                C[i,0] = cost + delta if i%2==0 else cost - delta
+                C[m_acc:m_acc+m,0] = cost + delta if i%2==0 else cost - delta
                 route_exists[i] = 1 if i%2==0 else 0
             else:
-                #CV[n_acc:n_acc+n,0] = target_cost
-                #CE[m_acc:m_acc+m,0] = target_cost
-                C[i,0] = target_cost
+                C[m_acc:m_acc+m,0] = target_cost
                 route_exists[i] = 1 if target_cost >= cost else 0
             #end
 
@@ -98,23 +91,21 @@ class InstanceLoader(object):
                     edges_mask[m_acc+e] = 1
                 #end
             #end
-
-            # Populate and ER
-            ER[m_acc:m_acc+m, i] = 1
         #end
 
-        return EV, ER, W, C, edges_mask, route_exists, n_vertices, n_edges
+        return EV, W, C, edges_mask, route_exists, n_vertices, n_edges
     #end
 
-    def get_batches(self, batch_size):
+    def get_batches(self, batch_size, target_cost_dev):
         for i in range( len(self.filenames) // batch_size ):
             instances = list(self.get_instances(batch_size))
             instances = reduce(lambda x,y: x+y, zip(instances,instances))
-            yield InstanceLoader.create_batch(instances, self.target_cost_dev)
+            yield InstanceLoader.create_batch(instances, target_cost_dev)
         #end
     #end
 
     def reset(self):
+        random.shuffle(self.filenames)
         self.index = 0
     #end
 #end
@@ -288,7 +279,7 @@ def create_dataset_metric(nmin, nmax, conn_min, conn_max, path, bins=10**6, conn
 
         route = []
         while route == []:
-            n = np.random.randint(nmin,nmax)
+            n = np.random.randint(nmin,nmax+1)
             connectivity = np.random.uniform(conn_min,conn_max)
             Ma,Mw,route,nodes = create_graph_metric(n,bins,connectivity)
             # Compute route cost
@@ -307,3 +298,7 @@ def create_dataset_metric(nmin, nmax, conn_min, conn_max, path, bins=10**6, conn
 
 if __name__ == '__main__':
     loader = InstanceLoader('train',0)
+    EV, ER, W, C, edges_mask, route_exists, n_vertices, n_edges = InstanceLoader.create_batch(list(loader.get_instances(4)), 0)
+    
+    np.set_printoptions(threshold=np.inf)
+    print(C)
