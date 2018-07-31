@@ -201,7 +201,7 @@ def build_network(d):
 	rank10_labels = tf.TensorArray( size = p, dtype = tf.int32 )
 	rank10_predicted = tf.TensorArray( size = p, dtype = tf.int32 )
 	
-	_, acc_arr, cost_arr, top10acc_arr, rank10_labels, rank10_predicted, _ = tf.while_loop(
+	_, acc_arr, cost_arr, rank10_labels, rank10_predicted, _ = tf.while_loop(
 		_vote_while_cond,
 		_vote_while_body,
 		[ tf.constant( 0, dtype = tf.int32 ), acc_arr, cost_arr, rank10_labels, rank10_predicted, tf.constant( 0, dtype = tf.int32 ) ]
