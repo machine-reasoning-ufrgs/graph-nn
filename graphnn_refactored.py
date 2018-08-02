@@ -88,8 +88,8 @@ class GraphNN(object):
       else:
         self.matrix_placeholders[m] = tf.placeholder(self.float_dtype, shape=(None,None), name=m)
       #end
-      self.time_steps = tf.placeholder(tf.int32, shape=(), name='time_steps')
     #end
+    self.time_steps = tf.placeholder(tf.int32, shape=(), name='time_steps')
   #end
 
   def _init_parameters(self):
