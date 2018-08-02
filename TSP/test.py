@@ -34,7 +34,7 @@ def extract_embeddings_and_predictions(sess, model, instance, time_steps=32, tar
     feed_dict = {
         model['gnn'].matrix_placeholders['EV']: EV,
         model['gnn'].matrix_placeholders['W']: W,
-        model['route_costs']: C,
+        model['gnn'].matrix_placeholders['C']: C,
         model['gnn'].time_steps: time_steps,
         model['route_exists']: route_exists,
         model['n_vertices']: n_vertices,
@@ -215,7 +215,7 @@ def draw_routes():
         # Restore saved weights
         load_weights(sess,'./TSP-checkpoints-decision-0.05/epoch=200.0')
 
-        target_cost_dev = +0.1
+        target_cost_dev = +0.05
 
         # Create instance
         while True:
@@ -232,7 +232,7 @@ def draw_routes():
         #end
 
         # Define timesteps range
-        timesteps = np.arange(20,32+1,4)
+        timesteps = np.arange(2,32+1,10)
         # Init figure
         f, axes = plt.subplots(1, len(timesteps), dpi=200, sharex=True, sharey=True)
         # Iterate over timesteps
@@ -260,13 +260,13 @@ def draw_routes():
             #end
 
             # Plot edges
-            for k in range(1):
+            for k in range(1,2):
                 color = ['red','blue'][k]
                 for e,(i,j) in enumerate(edges):
                     if e in clusters[k]:
                         x0,y0 = nodes[i,:]
                         x1,y1 = nodes[j,:]
-                        ax.plot([x0,x1],[y0,y1], c=color, linewidth=0.5)
+                        ax.plot([x0,x1],[y0,y1], c=color, linewidth=0.5, zorder=1)
                     #end
                 #end
             #end
@@ -280,9 +280,14 @@ def draw_routes():
                     edge_not_in_route.append(e)
                 #end
             #end
+
+            ax.scatter(nodes[:,0], nodes[:,1], c='white', edgecolors='black', zorder=2)
             
-            ax.scatter(edge_projections[edge_not_in_route,0],edge_projections[edge_not_in_route,1], c='red', edgecolors='black')
-            ax.scatter(edge_projections[edge_in_route,0],edge_projections[edge_in_route,1], c='blue', edgecolors='black')
+            #ax.scatter(edge_projections[edge_not_in_route,0],edge_projections[edge_not_in_route,1], c='red', edgecolors='black')
+            #ax.scatter(edge_projections[edge_in_route,0],edge_projections[edge_in_route,1], c='blue', edgecolors='black')
+
+            #ax.scatter(edge_projections[clusters[1],0],edge_projections[clusters[1],1], c='red', edgecolors='black')
+            #ax.scatter(edge_projections[clusters[0],0],edge_projections[clusters[0],1], c='blue', edgecolors='black')
 
         #end
 
@@ -295,14 +300,14 @@ def test(time_steps=32, target_cost_dev=0.05):
 
     test_samples = 32*32
 
-    if not os.path.isdir('test-complete'):
+    if not os.path.isdir('test'):
         print('Creating {} Complete Test instances'.format(test_samples), flush=True)
         create_dataset_metric(
             20, 20,
             1, 1,
             bins=10**6,
             samples=test_samples,
-            path='test-complete')
+            path='test')
     #end
 
     d                       = 64
@@ -311,7 +316,7 @@ def test(time_steps=32, target_cost_dev=0.05):
     test_batches_per_epoch  = 16*32
 
     # Create test loader
-    test_loader = InstanceLoader("test-complete")
+    test_loader = InstanceLoader("test")
 
     # Build model
     print("Building model ...", flush=True)
@@ -326,7 +331,7 @@ def test(time_steps=32, target_cost_dev=0.05):
         sess.run( tf.global_variables_initializer() )
 
         # Restore saved weights
-        load_weights(sess,'./TSP-checkpoints-decision-0.05')
+        load_weights(sess,'./TSP-checkpoints-decision-0.05/epoch=200.0')
         
         with open('TSP-log.dat','w') as logfile:
             # Run for a number of epochs
