@@ -144,8 +144,8 @@ def create_dataset(
     degree_not_normalized = calc_degree( G, normalized = False )
     betweenness_normalized = calc_betweenness( G, normalized = True )
     betweenness_not_normalized = calc_betweenness( G, normalized = False )
-    closeness_normalized = calc_betweenness( G, normalized = True )
-    closeness_not_normalized = calc_betweenness( G, normalized = False )
+    closeness_normalized = calc_closeness( G, normalized = True )
+    closeness_not_normalized = calc_closeness( G, normalized = False )
     try:
       eigenvector = calc_eigenvector( G )
     except nx.exception.PowerIterationFailedConvergence as e:
